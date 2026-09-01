@@ -14,6 +14,7 @@ const MIN_FLAT_RATE_CENTS_PER_HOUR = 10000;
 const ADMIN_ACCESS_CODE = process.env.ADMIN_ACCESS_CODE || "CHANGE-ME-OWNER-CODE";
 const CUSTOMER_TERMS_VERSION = "customer-repair-authorization-v1";
 const TECHNICIAN_TERMS_VERSION = "technician-service-standards-v1";
+const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
 
 const roles = {
   CUSTOMER: "CUSTOMER",
@@ -100,6 +101,7 @@ function blankDb() {
     availability: [],
     adminUsers: [],
     agreementAcceptances: [],
+    passwordResetTokens: [],
     platformSettings: [],
     auditLogs: [],
     sessions: []
@@ -115,6 +117,38 @@ function verifyPassword(password, stored) {
   const [salt, hash] = stored.split(":");
   const actual = crypto.scryptSync(password, salt, 64);
   return crypto.timingSafeEqual(Buffer.from(hash, "hex"), actual);
+}
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+async function sendPasswordResetEmail(user, resetUrl) {
+  const subject = "Reset your WrenchLane password";
+  const text = `Use this secure link to reset your WrenchLane password. This link expires in 1 hour.\n\n${resetUrl}`;
+  if (!process.env.EMAIL_PROVIDER_API_KEY) {
+    console.log(`[password-reset] Email provider not configured. Reset link for ${user.email}: ${resetUrl}`);
+    return { sent: false, provider: "LOCAL_LOG" };
+  }
+  const from = process.env.EMAIL_FROM || "WrenchLane <onboarding@resend.dev>";
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.EMAIL_PROVIDER_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from,
+      to: [user.email],
+      subject,
+      text
+    })
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Email provider rejected the reset email: ${details}`);
+  }
+  return { sent: true, provider: "RESEND" };
 }
 
 function signedSessionValue(sessionId) {
@@ -422,7 +456,46 @@ async function api(req, res, db) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/auth/password-reset") {
-    return send(res, 200, { ok: true, message: "Password reset flow is ready for an email provider. Set EMAIL_PROVIDER_API_KEY to send real reset links." });
+    const email = sanitize(body.email).toLowerCase();
+    const user = db.users.find((item) => item.email === email && item.status === "ACTIVE");
+    if (!user) return send(res, 200, { ok: true, message: "If that account exists, a password reset email will be sent." });
+    const token = crypto.randomBytes(32).toString("hex");
+    const resetUrl = `${APP_BASE_URL.replace(/\/$/, "")}/?resetToken=${token}`;
+    db.passwordResetTokens = db.passwordResetTokens.filter((item) => item.userId !== user.id || item.usedAt);
+    db.passwordResetTokens.push({
+      id: id("prt"),
+      userId: user.id,
+      tokenHash: hashToken(token),
+      createdAt: now(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      usedAt: null
+    });
+    const emailResult = await sendPasswordResetEmail(user, resetUrl);
+    addAudit(db, user.id, "PASSWORD_RESET_REQUESTED", "User", user.id, { provider: emailResult.provider });
+    saveDb(db);
+    return send(res, 200, {
+      ok: true,
+      message: emailResult.sent ? "Password reset email sent." : "Password reset link created. Add EMAIL_PROVIDER_API_KEY in Render to send real emails.",
+      resetUrl: emailResult.sent ? undefined : resetUrl
+    });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/password-reset/confirm") {
+    const token = String(body.token || "");
+    const password = String(body.password || "");
+    if (password.length < 8) return error(res, 400, "New password must be at least 8 characters.");
+    const tokenHash = hashToken(token);
+    const reset = db.passwordResetTokens.find((item) => item.tokenHash === tokenHash && !item.usedAt && item.expiresAt > now());
+    if (!reset) return error(res, 400, "Reset link is invalid or expired.");
+    const user = db.users.find((item) => item.id === reset.userId && item.status === "ACTIVE");
+    if (!user) return error(res, 400, "Reset link is invalid or expired.");
+    user.passwordHash = hashPassword(password);
+    user.updatedAt = now();
+    reset.usedAt = now();
+    db.sessions = db.sessions.filter((session) => session.userId !== user.id);
+    addAudit(db, user.id, "PASSWORD_RESET_COMPLETED", "User", user.id);
+    saveDb(db);
+    return send(res, 200, { ok: true, message: "Password updated. You can log in with your new password." });
   }
 
   if (req.method === "GET" && url.pathname === "/api/me") {

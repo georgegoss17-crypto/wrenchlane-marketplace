@@ -31,6 +31,8 @@ services:
         sync: false
       - key: EMAIL_PROVIDER_API_KEY
         sync: false
+      - key: EMAIL_FROM
+        sync: false
       - key: SMS_PROVIDER_API_KEY
         sync: false
 

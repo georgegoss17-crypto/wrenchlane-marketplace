@@ -79,8 +79,15 @@ function setAuthTab(name) {
 }
 
 function showShell() {
+  const isReset = new URLSearchParams(location.search).has("resetToken");
+  $("#resetPanel").classList.toggle("hidden", !isReset);
   $("#authPanel").classList.toggle("hidden", Boolean(state.user));
   $("#appShell").classList.toggle("hidden", !state.user);
+  if (isReset) {
+    $("#authPanel").classList.add("hidden");
+    $("#appShell").classList.add("hidden");
+    return;
+  }
   $$(".public-action").forEach((button) => button.classList.toggle("hidden", Boolean(state.user)));
   $$(".app-action").forEach((button) => button.classList.toggle("hidden", !state.user));
   $("#logoutBtn").classList.toggle("hidden", !state.user);
@@ -324,10 +331,38 @@ $("#resetPasswordBtn").addEventListener("click", async () => {
   const email = $("#loginForm [name=email]").value;
   try {
     const out = await api("/api/auth/password-reset", { method: "POST", body: { email } });
+    if (out.resetUrl) {
+      toast(`${out.message} Local test link: ${out.resetUrl}`);
+      console.log("Password reset link:", out.resetUrl);
+    } else {
+      toast(out.message);
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$("#newPasswordForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.currentTarget).entries());
+  if (body.password !== body.confirmPassword) return toast("Passwords do not match.");
+  try {
+    const out = await api("/api/auth/password-reset/confirm", { method: "POST", body });
+    history.replaceState({}, "", "/");
+    setAuthTab("login");
+    $("#resetPanel").classList.add("hidden");
+    $("#authPanel").classList.remove("hidden");
     toast(out.message);
   } catch (err) {
     toast(err.message);
   }
+});
+
+$("#backToLoginBtn").addEventListener("click", () => {
+  history.replaceState({}, "", "/");
+  setAuthTab("login");
+  $("#resetPanel").classList.add("hidden");
+  $("#authPanel").classList.remove("hidden");
 });
 
 $$("[data-login]").forEach((btn) => btn.addEventListener("click", () => login(btn.dataset.login)));
@@ -445,4 +480,8 @@ $("#findJobs").addEventListener("click", refreshTechnician);
 
 setPreferredTime();
 setAuthTab("signup");
+const resetToken = new URLSearchParams(location.search).get("resetToken");
+if (resetToken) {
+  $("#newPasswordForm [name=token]").value = resetToken;
+}
 refreshBase().catch(() => showShell());

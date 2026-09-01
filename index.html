@@ -128,6 +128,22 @@
         </section>
       </section>
 
+      <section id="resetPanel" class="hidden auth-grid">
+        <div class="intro compact-intro">
+          <p class="eyebrow">Password reset</p>
+          <h1>Set a new password</h1>
+          <p>Use the secure link from your email to create a new password for your customer, technician, or admin account.</p>
+        </div>
+        <form id="newPasswordForm" class="panel auth-card">
+          <h2>New Password</h2>
+          <input name="token" type="hidden" />
+          <label>New password <input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
+          <label>Confirm password <input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required /></label>
+          <button type="submit">Update Password</button>
+          <button type="button" class="link-button" id="backToLoginBtn">Back to login</button>
+        </form>
+      </section>
+
       <section id="appShell" class="hidden workspace">
         <aside class="rail">
           <div id="userBadge"></div>
