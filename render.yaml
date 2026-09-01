@@ -19,6 +19,8 @@ services:
         value: /var/data
       - key: SESSION_SECRET
         generateValue: true
+      - key: ADMIN_ACCESS_CODE
+        sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET

@@ -10,6 +10,10 @@ const ROOT = __dirname;
 const PUBLIC_DIR = ROOT;
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
 const SESSION_SECRET = process.env.SESSION_SECRET || "local-development-secret-change-before-production";
+const MIN_FLAT_RATE_CENTS_PER_HOUR = 10000;
+const ADMIN_ACCESS_CODE = process.env.ADMIN_ACCESS_CODE || "CHANGE-ME-OWNER-CODE";
+const CUSTOMER_TERMS_VERSION = "customer-repair-authorization-v1";
+const TECHNICIAN_TERMS_VERSION = "technician-service-standards-v1";
 
 const roles = {
   CUSTOMER: "CUSTOMER",
@@ -67,6 +71,10 @@ function money(centsValue) {
   return `$${(centsValue / 100).toFixed(2)}`;
 }
 
+function minimumFlatRateCents(laborMinutes) {
+  return Math.ceil((Math.max(Number(laborMinutes || 60), 60) / 60) * MIN_FLAT_RATE_CENTS_PER_HOUR);
+}
+
 function blankDb() {
   return {
     users: [],
@@ -83,6 +91,7 @@ function blankDb() {
     payouts: [],
     additionalWorkRequests: [],
     inspectionFindings: [],
+    technicianProfileComments: [],
     messages: [],
     reviews: [],
     notifications: [],
@@ -90,6 +99,7 @@ function blankDb() {
     locations: [],
     availability: [],
     adminUsers: [],
+    agreementAcceptances: [],
     platformSettings: [],
     auditLogs: [],
     sessions: []
@@ -139,6 +149,13 @@ function seed(db) {
     yearsExperience: 12,
     specialties: ["Brakes", "Diagnostics", "Suspension"],
     certifications: ["ASE Brakes", "ASE Electrical"],
+    applicationAnswers: {
+      yearsInField: 12,
+      hasTravelVehicle: true,
+      partsPreference: "Technician can source parts or customer can supply parts",
+      honestRepairs: true,
+      complaintResolution: true
+    },
     serviceRadiusMiles: 35,
     mobileServiceAvailable: true,
     shopServiceAvailable: true,
@@ -156,6 +173,7 @@ function seed(db) {
     { id: id("svc"), categoryId: electrical.id, name: "Check engine diagnostic", description: "Read DTCs and perform initial diagnostic workflow.", pricingModel: "HOURLY", basePriceCents: 14500, estimatedMinutes: 60, requiredSpecialty: "Diagnostics" }
   );
   db.platformSettings.push({ key: "platformCommissionPercent", value: "10", updatedAt: createdAt });
+  db.platformSettings.push({ key: "adminAccessCodeConfigured", value: ADMIN_ACCESS_CODE === "CHANGE-ME-OWNER-CODE" ? "false" : "true", updatedAt: createdAt });
   db.adminUsers.push({ id: id("adm"), userId: admin.id, createdAt });
   return db;
 }
@@ -168,7 +186,9 @@ function normalizeDb(db) {
   for (const profile of db.technicianProfiles) {
     if (typeof profile.bio !== "string") profile.bio = "";
     if (typeof profile.profilePhotoUrl !== "string") profile.profilePhotoUrl = "";
-    if (typeof profile.defaultFlatRateCents !== "number") profile.defaultFlatRateCents = 35000;
+    if (typeof profile.defaultFlatRateCents !== "number") profile.defaultFlatRateCents = MIN_FLAT_RATE_CENTS_PER_HOUR;
+    profile.defaultFlatRateCents = Math.max(profile.defaultFlatRateCents, MIN_FLAT_RATE_CENTS_PER_HOUR);
+    if (!profile.applicationAnswers) profile.applicationAnswers = {};
   }
   return db;
 }
@@ -332,11 +352,53 @@ async function api(req, res, db) {
     const password = String(body.password || "");
     const role = body.role;
     if (!email.includes("@") || password.length < 8 || ![roles.CUSTOMER, roles.TECHNICIAN].includes(role)) return error(res, 400, "Enter an email, password, and customer or technician role.");
+    if (role === roles.CUSTOMER && body.customerTermsAccepted !== true) return error(res, 400, "Customer repair authorization and payment terms must be accepted.");
+    if (role === roles.TECHNICIAN) {
+      if (body.technicianTermsAccepted !== true) return error(res, 400, "Technician service standards must be accepted.");
+      if (body.honestRepairs !== true || body.complaintResolution !== true) return error(res, 400, "Technicians must agree to honest repair recommendations and complaint resolution standards.");
+      if (!sanitize(body.legalName) || !sanitize(body.electronicSignature)) return error(res, 400, "Technician legal name and electronic signature are required.");
+    }
     if (db.users.some((user) => user.email === email)) return error(res, 409, "That email is already registered.");
     const user = { id: id("usr"), email, passwordHash: hashPassword(password), role, status: "ACTIVE", createdAt: now(), updatedAt: now() };
     db.users.push(user);
-    if (role === roles.CUSTOMER) db.customerProfiles.push({ id: id("cus"), userId: user.id, fullName: sanitize(body.fullName || "New Customer"), phone: "", createdAt: now(), updatedAt: now() });
-    if (role === roles.TECHNICIAN) db.technicianProfiles.push({ id: id("tec"), userId: user.id, fullName: sanitize(body.fullName || "New Technician"), profilePhotoUrl: "", bio: "", yearsExperience: 0, specialties: [], certifications: [], serviceRadiusMiles: 20, mobileServiceAvailable: true, shopServiceAvailable: false, hourlyRateCents: 9500, defaultFlatRateCents: 35000, verificationStatus: "PENDING", ratingAverage: 0, createdAt: now(), updatedAt: now() });
+    if (role === roles.CUSTOMER) {
+      db.customerProfiles.push({ id: id("cus"), userId: user.id, fullName: sanitize(body.fullName || "New Customer"), phone: "", createdAt: now(), updatedAt: now() });
+      db.agreementAcceptances.push({ id: id("agr"), userId: user.id, role, version: CUSTOMER_TERMS_VERSION, acceptedAt: now(), ipAddress: req.socket.remoteAddress || "" });
+    }
+    if (role === roles.TECHNICIAN) {
+      const yearsInField = Number(body.yearsInField || 0);
+      db.technicianProfiles.push({
+        id: id("tec"),
+        userId: user.id,
+        fullName: sanitize(body.fullName || "New Technician"),
+        profilePhotoUrl: "",
+        bio: "",
+        yearsExperience: yearsInField,
+        specialties: [],
+        certifications: [],
+        applicationAnswers: {
+          yearsInField,
+          legalName: sanitize(body.legalName),
+          businessName: sanitize(body.businessName),
+          hasTravelVehicle: body.hasTravelVehicle === true,
+          partsPreference: sanitize(body.partsPreference || ""),
+          honestRepairs: body.honestRepairs === true,
+          complaintResolution: body.complaintResolution === true,
+          electronicSignature: sanitize(body.electronicSignature),
+          agreementVersion: TECHNICIAN_TERMS_VERSION
+        },
+        serviceRadiusMiles: 20,
+        mobileServiceAvailable: true,
+        shopServiceAvailable: false,
+        hourlyRateCents: 10000,
+        defaultFlatRateCents: MIN_FLAT_RATE_CENTS_PER_HOUR,
+        verificationStatus: "PENDING",
+        ratingAverage: 0,
+        createdAt: now(),
+        updatedAt: now()
+      });
+      db.agreementAcceptances.push({ id: id("agr"), userId: user.id, role, version: TECHNICIAN_TERMS_VERSION, acceptedAt: now(), ipAddress: req.socket.remoteAddress || "", legalName: sanitize(body.legalName), businessName: sanitize(body.businessName), electronicSignature: sanitize(body.electronicSignature) });
+    }
     addAudit(db, user.id, "REGISTER", "User", user.id);
     saveDb(db);
     return send(res, 201, { user: publicUser(user) });
@@ -345,6 +407,7 @@ async function api(req, res, db) {
   if (req.method === "POST" && url.pathname === "/api/auth/login") {
     const user = db.users.find((item) => item.email === sanitize(body.email).toLowerCase());
     if (!user || !verifyPassword(String(body.password || ""), user.passwordHash)) return error(res, 401, "Invalid email or password.");
+    if (user.role === roles.ADMIN && sanitize(body.adminAccessCode) !== ADMIN_ACCESS_CODE) return error(res, 403, "Owner access code is required for admin login.");
     const session = { id: id("ses"), userId: user.id, createdAt: now(), expiresAt: new Date(Date.now() + 7 * 86400 * 1000).toISOString() };
     db.sessions.push(session);
     saveDb(db);
@@ -372,7 +435,34 @@ async function api(req, res, db) {
   if (req.method === "GET" && url.pathname === "/api/services") return send(res, 200, { categories: db.serviceCategories, services: db.services });
 
   if (req.method === "GET" && url.pathname === "/api/technicians") {
-    return send(res, 200, { technicians: db.technicianProfiles.filter((profile) => profile.verificationStatus === "APPROVED").map((profile) => ({ ...profile, user: publicUser(db.users.find((user) => user.id === profile.userId)) })) });
+    return send(res, 200, {
+      technicians: db.technicianProfiles.filter((profile) => profile.verificationStatus === "APPROVED").map((profile) => ({
+        ...profile,
+        user: publicUser(db.users.find((user) => user.id === profile.userId)),
+        reviews: db.reviews.filter((review) => review.technicianId === profile.userId),
+        comments: db.technicianProfileComments.filter((comment) => comment.technicianId === profile.userId)
+      }))
+    });
+  }
+
+  const technicianComment = url.pathname.match(/^\/api\/technicians\/([^/]+)\/comments$/);
+  if (technicianComment && req.method === "POST") {
+    const user = requireUser(req, res, db, [roles.CUSTOMER]);
+    if (!user) return;
+    const technician = db.technicianProfiles.find((profile) => profile.userId === technicianComment[1] && profile.verificationStatus === "APPROVED");
+    if (!technician) return error(res, 404, "Technician not found.");
+    const comment = {
+      id: id("tpc"),
+      technicianId: technician.userId,
+      customerId: user.id,
+      body: sanitize(body.body),
+      createdAt: now()
+    };
+    if (!comment.body) return error(res, 400, "Comment cannot be empty.");
+    db.technicianProfileComments.push(comment);
+    notify(db, technician.userId, "PROFILE_COMMENT", "New profile comment", comment.body);
+    saveDb(db);
+    return send(res, 201, { comment });
   }
 
   if (req.method === "PUT" && url.pathname === "/api/technician/profile") {
@@ -389,8 +479,8 @@ async function api(req, res, db) {
     profile.serviceRadiusMiles = Number(body.serviceRadiusMiles || profile.serviceRadiusMiles || 20);
     profile.mobileServiceAvailable = Boolean(body.mobileServiceAvailable);
     profile.shopServiceAvailable = Boolean(body.shopServiceAvailable);
-    profile.hourlyRateCents = Math.max(0, cents(body.hourlyRate || 0));
-    profile.defaultFlatRateCents = Math.max(0, cents(body.defaultFlatRate || 0));
+    profile.hourlyRateCents = Math.max(MIN_FLAT_RATE_CENTS_PER_HOUR, cents(body.hourlyRate || 0));
+    profile.defaultFlatRateCents = Math.max(MIN_FLAT_RATE_CENTS_PER_HOUR, cents(body.defaultFlatRate || 0));
     profile.updatedAt = now();
     saveDb(db);
     return send(res, 200, { profile });
@@ -479,8 +569,13 @@ async function api(req, res, db) {
       if (user.id !== booking.technicianId) return error(res, 403, "Only the technician can quote this booking.");
       const service = db.services.find((item) => item.id === booking.serviceId);
       const profile = db.technicianProfiles.find((item) => item.userId === user.id);
+      const laborMinutes = Number(body.laborMinutes || service.estimatedMinutes);
       const amountCents = Number(body.amountCents || profile?.defaultFlatRateCents || service.basePriceCents);
-      const quote = { id: id("quo"), bookingId: booking.id, technicianId: user.id, pricingModel: body.pricingModel || service.pricingModel, laborMinutes: Number(body.laborMinutes || service.estimatedMinutes), amountCents, status: "PENDING", customerApprovedAt: null, createdAt: now() };
+      const minAmountCents = minimumFlatRateCents(laborMinutes);
+      if ((body.pricingModel || service.pricingModel) === "FLAT_RATE" && amountCents < minAmountCents) {
+        return error(res, 400, `Flat-rate quotes must be at least ${money(minAmountCents)} for ${laborMinutes} minutes of work.`);
+      }
+      const quote = { id: id("quo"), bookingId: booking.id, technicianId: user.id, pricingModel: body.pricingModel || service.pricingModel, laborMinutes, amountCents, status: "PENDING", customerApprovedAt: null, createdAt: now() };
       db.quotes = db.quotes.filter((item) => item.bookingId !== booking.id);
       db.quotes.push(quote);
       booking.status = "AWAITING_CUSTOMER_APPROVAL";

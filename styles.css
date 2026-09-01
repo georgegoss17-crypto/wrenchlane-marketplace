@@ -154,6 +154,36 @@ textarea { min-height: 92px; resize: vertical; }
   font-weight: 800;
   margin-bottom: 10px;
 }
+.terms-box {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfdfe;
+}
+.terms-box summary {
+  cursor: pointer;
+  font-weight: 900;
+  color: var(--road);
+}
+.terms-scroll {
+  max-height: 220px;
+  overflow: auto;
+  margin-top: 10px;
+  padding-right: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.terms-scroll h3 {
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+.agree-line {
+  display: flex;
+  grid-template-columns: none;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--ink);
+}
 .hidden { display: none !important; }
 .workspace {
   display: grid;
@@ -203,6 +233,39 @@ textarea { min-height: 92px; resize: vertical; }
 .metrics span { color: var(--muted); font-weight: 750; font-size: 0.86rem; }
 .metrics strong { font-size: 1.45rem; }
 .grid.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.tech-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.tech-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.tech-card.selected {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px rgba(245, 179, 53, 0.22);
+}
+.comment-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.comment-list {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+}
+.comment {
+  background: var(--steel);
+  border-radius: 7px;
+  padding: 8px;
+  font-size: 0.86rem;
+}
 .list { display: grid; gap: 10px; }
 .item {
   border: 1px solid var(--line);
@@ -296,7 +359,7 @@ textarea { min-height: 92px; resize: vertical; }
 .compact { max-width: 420px; }
 
 @media (max-width: 900px) {
-  .auth-grid, .workspace, .grid.two, .mini-form { grid-template-columns: 1fr; }
+  .auth-grid, .workspace, .grid.two, .mini-form, .tech-grid { grid-template-columns: 1fr; }
   .rail { position: static; grid-template-columns: repeat(3, 1fr); }
   #userBadge { grid-column: 1 / -1; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

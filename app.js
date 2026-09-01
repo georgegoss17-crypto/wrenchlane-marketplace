@@ -114,15 +114,39 @@ async function refreshCustomer() {
   if (!state.user || state.user.role !== "CUSTOMER") return;
   state.vehicles = (await api("/api/vehicles")).vehicles;
   state.bookings = (await api("/api/bookings")).bookings;
+  state.technicians = (await api("/api/technicians")).technicians;
   $("#vehicleSelect").innerHTML = state.vehicles.map((v) => `<option value="${v.id}">${v.year} ${v.make} ${v.model}</option>`).join("");
   $("#bookingHint").classList.toggle("hidden", state.vehicles.length > 0);
   $("#bookingForm button[type=submit]").disabled = state.vehicles.length === 0;
+  $("#technicianProfiles").innerHTML = state.technicians.map(renderTechnicianCard).join("") || "<p class='fineprint'>No approved technicians are available yet.</p>";
   $("#vehicleCount").textContent = state.vehicles.length;
   const active = state.bookings.find((b) => !["COMPLETED", "CANCELLED", "REFUNDED"].includes(b.status));
   $("#activeRepair").textContent = active ? active.status.replaceAll("_", " ") : "No active repair";
   $("#upcomingAppointment").textContent = active ? new Date(active.preferredAt).toLocaleString() : "None yet";
   $("#historyCount").textContent = `${state.bookings.filter((b) => b.status === "COMPLETED").length} completed`;
   $("#customerBookings").innerHTML = state.bookings.map(renderCustomerBooking).join("") || "<p class='fineprint'>No bookings yet.</p>";
+}
+
+function renderTechnicianCard(t) {
+  const comments = [...(t.reviews || []).map((review) => review.body), ...(t.comments || []).map((comment) => comment.body)].filter(Boolean);
+  return `<article class="tech-card" data-tech-card="${t.userId}">
+    <div class="profile-card">
+      ${t.profilePhotoUrl ? `<img class="avatar" src="${t.profilePhotoUrl}" alt="${escapeHtml(t.fullName)}" />` : `<div class="avatar">WL</div>`}
+      <div>
+        <strong>${escapeHtml(t.fullName)}</strong>
+        <p class="meta">${t.ratingAverage || "New"} stars - ${t.yearsExperience || 0} years</p>
+        <p class="meta">Flat rate from ${money(t.defaultFlatRateCents)} minimum</p>
+      </div>
+    </div>
+    <p>${escapeHtml(t.bio || "This technician has not added a bio yet.")}</p>
+    <p class="fineprint">${escapeHtml((t.specialties || []).join(", "))}</p>
+    <div class="comment-list">${comments.slice(-4).map((comment) => `<div class="comment">${escapeHtml(comment)}</div>`).join("") || "<p class='fineprint'>No profile comments yet.</p>"}</div>
+    <form class="comment-form" data-comment-form="${t.userId}">
+      <input name="body" placeholder="Leave a profile comment" />
+      <button type="submit">Post</button>
+    </form>
+    <button type="button" data-select-tech="${t.userId}">Select This Technician</button>
+  </article>`;
 }
 
 function renderCustomerBooking(b) {
@@ -198,9 +222,10 @@ function renderTechJob(b) {
     <button type="submit">Accept Time</button>
   </form>` : "";
   const quote = ["REQUESTED", "BOOKED"].includes(b.status) && !b.quote ? `<form class="mini-form" data-quote-form="${b.id}">
-    <label>Flat rate <input name="amount" type="number" min="1" value="${dollars(state.profile?.defaultFlatRateCents || b.service.basePriceCents)}" /></label>
+    <label>Flat rate <input name="amount" type="number" min="${Math.ceil(Math.max(b.service.estimatedMinutes, 60) / 60 * 100)}" value="${dollars(Math.max(state.profile?.defaultFlatRateCents || b.service.basePriceCents, Math.ceil(Math.max(b.service.estimatedMinutes, 60) / 60 * 10000)))}" /></label>
     <label>Labor minutes <input name="laborMinutes" type="number" min="15" value="${b.service.estimatedMinutes}" /></label>
     <button type="submit">Send Quote</button>
+    <p class="fineprint">Minimum flat rate is $100 per hour equivalent.</p>
   </form>` : "";
   const start = b.status === "BOOKED" ? `<button data-status="${b.id}:IN_PROGRESS">Start Job</button>` : "";
   const add = b.status === "IN_PROGRESS" ? `<button data-additional="${b.id}">Additional Work</button>` : "";
@@ -239,8 +264,8 @@ async function refreshAdmin() {
   document.querySelector("[name=platformCommissionPercent]").value = state.admin.commissionPercent;
 }
 
-async function login(email, password = "DemoPass123!") {
-  await api("/api/auth/login", { method: "POST", body: { email, password } });
+async function login(email, password = "DemoPass123!", adminAccessCode = "") {
+  await api("/api/auth/login", { method: "POST", body: { email, password, adminAccessCode } });
   await refreshBase();
   toast("Logged in.");
 }
@@ -248,6 +273,17 @@ async function login(email, password = "DemoPass123!") {
 async function register(role, form) {
   const body = Object.fromEntries(new FormData(form).entries());
   body.role = role;
+  if (role === "CUSTOMER") body.customerTermsAccepted = form.elements.customerTermsAccepted.checked;
+  if (role === "TECHNICIAN") {
+    body.yearsInField = Number(body.yearsInField || 0);
+    body.hasTravelVehicle = body.hasTravelVehicle === "true";
+    body.honestRepairs = form.elements.honestRepairs.checked;
+    body.complaintResolution = form.elements.complaintResolution.checked;
+    body.technicianTermsAccepted = form.elements.technicianTermsAccepted.checked;
+    body.legalName = form.elements.legalName.value;
+    body.businessName = form.elements.businessName.value;
+    body.electronicSignature = form.elements.electronicSignature.value;
+  }
   await api("/api/auth/register", { method: "POST", body });
   if (role === "CUSTOMER") {
     await login(body.email, body.password);
@@ -273,7 +309,15 @@ $("#technicianSignupForm").addEventListener("submit", async (e) => {
 $("#loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = new FormData(e.currentTarget);
-  try { await login(form.get("email"), form.get("password")); } catch (err) { toast(err.message); }
+  try { await login(form.get("email"), form.get("password"), form.get("adminAccessCode") || ""); } catch (err) { toast(err.message); }
+});
+
+$("#ownerLoginBtn").addEventListener("click", () => {
+  setAuthTab("login");
+  $("#ownerCodeField").classList.remove("hidden");
+  $("#loginForm [name=email]").value = "admin@demo.com";
+  $("#loginForm [name=password]").value = "";
+  toast("Enter your private owner access code to open admin controls.");
 });
 
 $("#resetPasswordBtn").addEventListener("click", async () => {
@@ -345,6 +389,14 @@ document.body.addEventListener("submit", async (e) => {
       await refreshTechnician();
       toast("Inspection finding uploaded.");
     }
+    if (form.dataset.commentForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/technicians/${form.dataset.commentForm}/comments`, { method: "POST", body });
+      form.reset();
+      await refreshCustomer();
+      toast("Comment added to technician profile.");
+    }
   } catch (err) {
     toast(err.message);
   }
@@ -366,6 +418,12 @@ document.body.addEventListener("click", async (e) => {
     if (target.dataset.addApprove) { await api(`/api/additional-work/${target.dataset.addApprove}/approve`, { method: "POST" }); handled = true; }
     if (target.dataset.addDecline) { await api(`/api/additional-work/${target.dataset.addDecline}/decline`, { method: "POST" }); handled = true; }
     if (target.dataset.review) { await api(`/api/bookings/${target.dataset.review}/review`, { method: "POST", body: { rating: 5, body: "Professional work and clear communication." } }); handled = true; }
+    if (target.dataset.selectTech) {
+      $("#technicianSelect").value = target.dataset.selectTech;
+      $$("[data-tech-card]").forEach((card) => card.classList.toggle("selected", card.dataset.techCard === target.dataset.selectTech));
+      $("#bookingForm").scrollIntoView({ behavior: "smooth", block: "start" });
+      toast("Technician selected. Describe what you need done.");
+    }
     if (handled) {
       await refreshCustomer();
       await refreshTechnician();
