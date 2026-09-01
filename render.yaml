@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: wrenchlane-marketplace
+    env: node
+    plan: starter
+    buildCommand: ""
+    startCommand: node src/server.js
+    healthCheckPath: /api/health
+    disk:
+      name: wrenchlane-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: DATA_DIR
+        value: /var/data
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_CONNECT_CLIENT_ID
+        sync: false
+      - key: VIN_DECODER_API_KEY
+        sync: false
+      - key: EMAIL_PROVIDER_API_KEY
+        sync: false
+      - key: SMS_PROVIDER_API_KEY
+        sync: false
