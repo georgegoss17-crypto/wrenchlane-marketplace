@@ -13,9 +13,11 @@
         <span>WrenchLane</span>
       </div>
       <nav>
-        <button class="ghost" data-view="customer">Customer</button>
-        <button class="ghost" data-view="technician">Technician</button>
-        <button class="ghost" data-view="admin">Admin</button>
+        <button class="ghost public-action" data-auth-tab="signup">Create account</button>
+        <button class="ghost public-action" data-auth-tab="login">Log in</button>
+        <button class="ghost app-action hidden" data-view="customer">Customer</button>
+        <button class="ghost app-action hidden" data-view="technician">Technician</button>
+        <button class="ghost app-action hidden" data-view="admin">Admin</button>
         <button id="logoutBtn" class="icon-btn" title="Log out">Log out</button>
       </nav>
     </header>
@@ -26,18 +28,52 @@
           <p class="eyebrow">Automotive repair marketplace</p>
           <h1>Need a mechanic?</h1>
           <p>Book approved mobile or shop technicians, approve flat-rate quotes, message through the job, and keep repair records in one place.</p>
-        </div>
-        <form id="loginForm" class="panel">
-          <h2>Open Your Dashboard</h2>
-          <label>Email <input name="email" type="email" value="customer@demo.com" required /></label>
-          <label>Password <input name="password" type="password" value="DemoPass123!" required /></label>
-          <button type="submit">Log in</button>
-          <div class="quick-logins">
-            <button type="button" data-login="customer@demo.com">Customer demo</button>
-            <button type="button" data-login="tech@demo.com">Technician demo</button>
-            <button type="button" data-login="admin@demo.com">Admin demo</button>
+          <div class="hero-actions">
+            <button data-auth-tab="signup">Book a Technician</button>
+            <button class="ghost dark" data-auth-tab="tech">Apply as Technician</button>
           </div>
-        </form>
+        </div>
+        <section class="panel auth-card">
+          <div class="auth-tabs">
+            <button class="active" type="button" data-auth-tab="signup">Customer</button>
+            <button type="button" data-auth-tab="login">Log in</button>
+            <button type="button" data-auth-tab="tech">Technician</button>
+          </div>
+
+          <form id="signupForm" class="auth-form">
+            <h2>Create Customer Account</h2>
+            <p class="fineprint">Start with your name, email, and password. After signup you can add a vehicle and request a repair.</p>
+            <label>Full name <input name="fullName" autocomplete="name" required /></label>
+            <label>Email <input name="email" type="email" autocomplete="email" required /></label>
+            <label>Password <input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
+            <button type="submit">Create Account</button>
+          </form>
+
+          <form id="loginForm" class="auth-form hidden">
+            <h2>Log In</h2>
+            <label>Email <input name="email" type="email" autocomplete="email" required /></label>
+            <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
+            <button type="submit">Log In</button>
+            <button class="link-button" type="button" id="resetPasswordBtn">Send password reset link</button>
+            <details class="demo-access">
+              <summary>Demo staff access</summary>
+              <div class="quick-logins">
+                <button type="button" data-login="customer@demo.com">Customer demo</button>
+                <button type="button" data-login="tech@demo.com">Technician demo</button>
+                <button type="button" data-login="admin@demo.com">Admin demo</button>
+              </div>
+            </details>
+          </form>
+
+          <form id="technicianSignupForm" class="auth-form hidden">
+            <h2>Apply as Technician</h2>
+            <p class="fineprint">Technicians can create a profile now. An admin must approve the profile before paid jobs can be accepted.</p>
+            <label>Professional name <input name="fullName" autocomplete="name" required /></label>
+            <label>Email <input name="email" type="email" autocomplete="email" required /></label>
+            <label>Password <input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
+            <button type="submit">Submit Application</button>
+          </form>
+        </section>
       </section>
 
       <section id="appShell" class="hidden workspace">
@@ -82,6 +118,7 @@
 
             <form id="bookingForm" class="panel">
               <h2>Repair Request</h2>
+              <p id="bookingHint" class="fineprint hidden">Add a vehicle first, then you can request a technician.</p>
               <label>Vehicle <select name="vehicleId" id="vehicleSelect"></select></label>
               <label>Service <select name="serviceId" id="serviceSelect"></select></label>
               <label>Technician <select name="technicianId" id="technicianSelect"></select></label>
@@ -120,6 +157,34 @@
             <div><span>Current job</span><strong id="currentJob">None</strong></div>
             <div><span>Earnings</span><strong id="earnings">$0.00</strong></div>
             <div><span>Rating</span><strong id="techRating">4.9</strong></div>
+          </div>
+          <div class="grid two">
+            <form id="techProfileForm" class="panel">
+              <h2>Professional Profile</h2>
+              <label>Profile photo <input name="profilePhoto" type="file" accept="image/*" /></label>
+              <label>Display name <input name="fullName" id="techFullName" required /></label>
+              <label>Bio <textarea name="bio" id="techBio" placeholder="Describe your experience, shop background, specialties, and how you work with customers."></textarea></label>
+              <div class="form-row">
+                <label>Years in field <input name="yearsExperience" id="techYears" type="number" min="0" /></label>
+                <label>Default flat rate <input name="defaultFlatRate" id="techFlatRate" type="number" min="0" step="1" /></label>
+              </div>
+              <div class="form-row">
+                <label>Hourly rate <input name="hourlyRate" id="techHourlyRate" type="number" min="0" step="1" /></label>
+                <label>Service radius miles <input name="serviceRadiusMiles" id="techRadius" type="number" min="1" /></label>
+              </div>
+              <label>Specialties <input name="specialties" id="techSpecialties" placeholder="Brakes, Diagnostics, Suspension" /></label>
+              <label>Certifications <input name="certifications" id="techCertifications" placeholder="ASE Brakes, ASE Electrical" /></label>
+              <div class="check-row">
+                <label><input name="mobileServiceAvailable" id="techMobile" type="checkbox" /> Mobile service</label>
+                <label><input name="shopServiceAvailable" id="techShop" type="checkbox" /> Shop service</label>
+              </div>
+              <button type="submit">Save Profile</button>
+            </form>
+            <section class="panel">
+              <h2>How Scheduling Works</h2>
+              <p class="fineprint">Customers request a preferred time. You choose the final appointment time when you accept. The app blocks another job within two hours of that appointment.</p>
+              <div id="techProfilePreview" class="profile-preview"></div>
+            </section>
           </div>
           <section class="panel">
             <h2>Job Queue</h2>

@@ -82,6 +82,7 @@ function blankDb() {
     payments: [],
     payouts: [],
     additionalWorkRequests: [],
+    inspectionFindings: [],
     messages: [],
     reviews: [],
     notifications: [],
@@ -134,6 +135,7 @@ function seed(db) {
     userId: tech.id,
     fullName: "Avery Masterson",
     profilePhotoUrl: "",
+    bio: "ASE-certified mobile technician focused on clear estimates, clean work, and honest inspections.",
     yearsExperience: 12,
     specialties: ["Brakes", "Diagnostics", "Suspension"],
     certifications: ["ASE Brakes", "ASE Electrical"],
@@ -141,6 +143,7 @@ function seed(db) {
     mobileServiceAvailable: true,
     shopServiceAvailable: true,
     hourlyRateCents: 10500,
+    defaultFlatRateCents: 42500,
     verificationStatus: "APPROVED",
     ratingAverage: 4.9,
     createdAt,
@@ -157,16 +160,29 @@ function seed(db) {
   return db;
 }
 
+function normalizeDb(db) {
+  const template = blankDb();
+  for (const key of Object.keys(template)) {
+    if (!Array.isArray(db[key])) db[key] = [];
+  }
+  for (const profile of db.technicianProfiles) {
+    if (typeof profile.bio !== "string") profile.bio = "";
+    if (typeof profile.profilePhotoUrl !== "string") profile.profilePhotoUrl = "";
+    if (typeof profile.defaultFlatRateCents !== "number") profile.defaultFlatRateCents = 35000;
+  }
+  return db;
+}
+
 function loadDb() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const dbFile = process.env.DB_FILE || path.join(DATA_DIR, "database.json");
   if (!fs.existsSync(dbFile)) {
-    const seeded = seed(blankDb());
+    const seeded = normalizeDb(seed(blankDb()));
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
     fs.writeFileSync(dbFile, JSON.stringify(seeded, null, 2));
     return seeded;
   }
-  return seed(JSON.parse(fs.readFileSync(dbFile, "utf8")));
+  return normalizeDb(seed(JSON.parse(fs.readFileSync(dbFile, "utf8"))));
 }
 
 function saveDb(db) {
@@ -205,7 +221,7 @@ function parseBody(req) {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 1_000_000) reject(new Error("Request body too large"));
+      if (body.length > 6_000_000) reject(new Error("Request body too large"));
     });
     req.on("end", () => {
       if (!body) return resolve({});
@@ -320,7 +336,7 @@ async function api(req, res, db) {
     const user = { id: id("usr"), email, passwordHash: hashPassword(password), role, status: "ACTIVE", createdAt: now(), updatedAt: now() };
     db.users.push(user);
     if (role === roles.CUSTOMER) db.customerProfiles.push({ id: id("cus"), userId: user.id, fullName: sanitize(body.fullName || "New Customer"), phone: "", createdAt: now(), updatedAt: now() });
-    if (role === roles.TECHNICIAN) db.technicianProfiles.push({ id: id("tec"), userId: user.id, fullName: sanitize(body.fullName || "New Technician"), profilePhotoUrl: "", yearsExperience: 0, specialties: [], certifications: [], serviceRadiusMiles: 20, mobileServiceAvailable: true, shopServiceAvailable: false, hourlyRateCents: 9500, verificationStatus: "PENDING", ratingAverage: 0, createdAt: now(), updatedAt: now() });
+    if (role === roles.TECHNICIAN) db.technicianProfiles.push({ id: id("tec"), userId: user.id, fullName: sanitize(body.fullName || "New Technician"), profilePhotoUrl: "", bio: "", yearsExperience: 0, specialties: [], certifications: [], serviceRadiusMiles: 20, mobileServiceAvailable: true, shopServiceAvailable: false, hourlyRateCents: 9500, defaultFlatRateCents: 35000, verificationStatus: "PENDING", ratingAverage: 0, createdAt: now(), updatedAt: now() });
     addAudit(db, user.id, "REGISTER", "User", user.id);
     saveDb(db);
     return send(res, 201, { user: publicUser(user) });
@@ -357,6 +373,27 @@ async function api(req, res, db) {
 
   if (req.method === "GET" && url.pathname === "/api/technicians") {
     return send(res, 200, { technicians: db.technicianProfiles.filter((profile) => profile.verificationStatus === "APPROVED").map((profile) => ({ ...profile, user: publicUser(db.users.find((user) => user.id === profile.userId)) })) });
+  }
+
+  if (req.method === "PUT" && url.pathname === "/api/technician/profile") {
+    const user = requireUser(req, res, db, [roles.TECHNICIAN]);
+    if (!user) return;
+    const profile = db.technicianProfiles.find((item) => item.userId === user.id);
+    if (!profile) return error(res, 404, "Technician profile not found.");
+    profile.fullName = sanitize(body.fullName || profile.fullName);
+    profile.profilePhotoUrl = String(body.profilePhotoUrl || profile.profilePhotoUrl || "");
+    profile.bio = sanitize(body.bio || "");
+    profile.yearsExperience = Number(body.yearsExperience || 0);
+    profile.specialties = String(body.specialties || "").split(",").map((item) => sanitize(item)).filter(Boolean);
+    profile.certifications = String(body.certifications || "").split(",").map((item) => sanitize(item)).filter(Boolean);
+    profile.serviceRadiusMiles = Number(body.serviceRadiusMiles || profile.serviceRadiusMiles || 20);
+    profile.mobileServiceAvailable = Boolean(body.mobileServiceAvailable);
+    profile.shopServiceAvailable = Boolean(body.shopServiceAvailable);
+    profile.hourlyRateCents = Math.max(0, cents(body.hourlyRate || 0));
+    profile.defaultFlatRateCents = Math.max(0, cents(body.defaultFlatRate || 0));
+    profile.updatedAt = now();
+    saveDb(db);
+    return send(res, 200, { profile });
   }
 
   if (req.method === "POST" && url.pathname === "/api/vehicles") {
@@ -401,8 +438,11 @@ async function api(req, res, db) {
       ...booking,
       vehicle: db.vehicles.find((item) => item.id === booking.vehicleId),
       service: db.services.find((item) => item.id === booking.serviceId),
+      technicianProfile: db.technicianProfiles.find((item) => item.userId === booking.technicianId),
       quote: db.quotes.find((item) => item.bookingId === booking.id),
-      invoice: db.invoices.find((item) => item.bookingId === booking.id)
+      invoice: db.invoices.find((item) => item.bookingId === booking.id),
+      additionalWorkRequests: db.additionalWorkRequests.filter((item) => item.bookingId === booking.id),
+      inspectionFindings: db.inspectionFindings.filter((item) => item.bookingId === booking.id)
     }));
     return send(res, 200, { bookings });
   }
@@ -424,11 +464,13 @@ async function api(req, res, db) {
 
     if (req.method === "POST" && action === "accept") {
       if (user.id !== booking.technicianId) return error(res, 403, "Only the assigned technician can accept this job.");
-      if (isDoubleBooked(db, user.id, booking.preferredAt, booking.id)) return error(res, 409, "You are already booked near that time.");
+      const scheduledAt = body.scheduledAt || booking.preferredAt;
+      if (isDoubleBooked(db, user.id, scheduledAt, booking.id)) return error(res, 409, "You are already booked near that time.");
       if (!canTransition(booking.status, "BOOKED")) return error(res, 409, "This job cannot be accepted from its current status.");
       booking.status = "BOOKED";
+      booking.preferredAt = scheduledAt;
       booking.updatedAt = now();
-      notify(db, booking.customerId, "BOOKING_ACCEPTED", "Technician accepted", "Your repair request was accepted.");
+      notify(db, booking.customerId, "BOOKING_ACCEPTED", "Technician accepted", `Your repair request was accepted for ${new Date(scheduledAt).toLocaleString()}.`);
       saveDb(db);
       return send(res, 200, { booking });
     }
@@ -436,7 +478,8 @@ async function api(req, res, db) {
     if (req.method === "POST" && action === "quote") {
       if (user.id !== booking.technicianId) return error(res, 403, "Only the technician can quote this booking.");
       const service = db.services.find((item) => item.id === booking.serviceId);
-      const amountCents = Number(body.amountCents || service.basePriceCents);
+      const profile = db.technicianProfiles.find((item) => item.userId === user.id);
+      const amountCents = Number(body.amountCents || profile?.defaultFlatRateCents || service.basePriceCents);
       const quote = { id: id("quo"), bookingId: booking.id, technicianId: user.id, pricingModel: body.pricingModel || service.pricingModel, laborMinutes: Number(body.laborMinutes || service.estimatedMinutes), amountCents, status: "PENDING", customerApprovedAt: null, createdAt: now() };
       db.quotes = db.quotes.filter((item) => item.bookingId !== booking.id);
       db.quotes.push(quote);
@@ -491,6 +534,27 @@ async function api(req, res, db) {
       notify(db, booking.customerId, "ADDITIONAL_WORK_REQUESTED", "Additional work requested", `${request.description}: ${money(request.amountCents)}`);
       saveDb(db);
       return send(res, 201, { request, booking });
+    }
+
+    if (req.method === "POST" && action === "findings") {
+      if (user.id !== booking.technicianId) return error(res, 403, "Only the technician can add inspection findings.");
+      const finding = {
+        id: id("fin"),
+        bookingId: booking.id,
+        technicianId: user.id,
+        customerId: booking.customerId,
+        title: sanitize(body.title || "Inspection finding"),
+        notes: sanitize(body.notes),
+        suggestedRepair: sanitize(body.suggestedRepair),
+        estimatedAmountCents: Math.max(0, cents(body.estimatedAmount || 0)),
+        photoUrls: Array.isArray(body.photoUrls) ? body.photoUrls.slice(0, 4).map(String) : [],
+        createdAt: now()
+      };
+      if (!finding.notes && !finding.suggestedRepair && !finding.photoUrls.length) return error(res, 400, "Add notes, a suggested repair, or at least one photo.");
+      db.inspectionFindings.push(finding);
+      notify(db, booking.customerId, "INSPECTION_FINDING_ADDED", "Technician added inspection findings", finding.suggestedRepair || finding.notes || finding.title);
+      saveDb(db);
+      return send(res, 201, { finding });
     }
 
     if (req.method === "POST" && action === "message") {

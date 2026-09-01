@@ -27,11 +27,20 @@ button {
   padding: 0.8rem 1rem;
   cursor: pointer;
 }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 button:hover { filter: brightness(0.97); }
-button.ghost, .rail button, .quick-logins button {
+button.ghost, .rail button, .quick-logins button, .auth-tabs button {
   background: #fff;
   border: 1px solid var(--line);
   color: var(--road);
+}
+button.ghost.dark {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.38);
+  color: #fff;
 }
 .topbar {
   min-height: 68px;
@@ -78,6 +87,12 @@ main { padding: 28px; }
 }
 .intro h1, .dashboard-head h1 { margin: 0; font-size: clamp(2rem, 5vw, 4.5rem); line-height: 1; }
 .intro p { max-width: 680px; font-size: 1.1rem; color: #e9eef2; }
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
 .eyebrow {
   margin: 0 0 10px;
   text-transform: uppercase;
@@ -103,9 +118,42 @@ input, select, textarea {
   color: var(--ink);
   background: #fff;
 }
+input[type="checkbox"] {
+  width: auto;
+}
 textarea { min-height: 92px; resize: vertical; }
 .quick-logins, .form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.auth-card {
+  align-self: start;
+  display: grid;
+  gap: 18px;
+}
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.auth-tabs button.active {
+  background: var(--road);
+  color: #fff;
+  border-color: var(--road);
+}
+.link-button {
+  background: transparent;
+  color: var(--road);
+  border: 1px solid var(--line);
+}
+.demo-access {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.demo-access summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 800;
+  margin-bottom: 10px;
+}
 .hidden { display: none !important; }
 .workspace {
   display: grid;
@@ -178,6 +226,58 @@ textarea { min-height: 92px; resize: vertical; }
 }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .actions button { padding: 0.58rem 0.75rem; }
+.mini-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+.mini-form textarea {
+  min-height: 74px;
+}
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.check-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.profile-preview {
+  display: grid;
+  gap: 12px;
+}
+.profile-card {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 14px;
+  align-items: center;
+}
+.avatar {
+  width: 76px;
+  height: 76px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--steel);
+  display: grid;
+  place-items: center;
+  color: var(--road);
+  font-weight: 900;
+}
+.finding-gallery {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.finding-gallery img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+}
 .fineprint, .meta { color: var(--muted); font-size: 0.88rem; margin: 0; }
 #toast {
   position: fixed;
@@ -196,7 +296,7 @@ textarea { min-height: 92px; resize: vertical; }
 .compact { max-width: 420px; }
 
 @media (max-width: 900px) {
-  .auth-grid, .workspace, .grid.two { grid-template-columns: 1fr; }
+  .auth-grid, .workspace, .grid.two, .mini-form { grid-template-columns: 1fr; }
   .rail { position: static; grid-template-columns: repeat(3, 1fr); }
   #userBadge { grid-column: 1 / -1; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -208,5 +308,5 @@ textarea { min-height: 92px; resize: vertical; }
   main { padding: 14px; }
   nav .ghost { display: none; }
   .dashboard-head { display: grid; padding: 20px; }
-  .metrics, .form-row, .quick-logins, .rail { grid-template-columns: 1fr; }
+  .metrics, .form-row, .quick-logins, .rail, .auth-tabs, .finding-gallery { grid-template-columns: 1fr; }
 }

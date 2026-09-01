@@ -4,7 +4,7 @@ services:
     env: node
     plan: starter
     buildCommand: ""
-    startCommand: node src/server.js
+    startCommand: node server.js
     healthCheckPath: /api/health
     disk:
       name: wrenchlane-data
@@ -31,3 +31,4 @@ services:
         sync: false
       - key: SMS_PROVIDER_API_KEY
         sync: false
+
