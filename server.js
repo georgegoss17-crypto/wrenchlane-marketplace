@@ -314,7 +314,8 @@ async function sendPasswordResetEmail(user, resetUrl) {
   });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Email provider rejected the reset email: ${details}`);
+    console.error(`[password-reset] Email provider rejected the reset email for ${user.email}: ${details}`);
+    return { sent: false, provider: "RESEND_ERROR", details };
   }
   return { sent: true, provider: "RESEND" };
 }
@@ -341,7 +342,8 @@ async function sendNotificationEmail(user, title, body) {
   });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`Email provider rejected the notification email: ${details}`);
+    console.error(`[notification-email] Email provider rejected the notification email for ${user.email}: ${details}`);
+    return { sent: false, provider: "RESEND_ERROR", details };
   }
   return { sent: true, provider: "RESEND" };
 }
@@ -427,7 +429,6 @@ function syncOwnerAdmin(db) {
     db.users.push(admin);
   }
   if (admin.email !== OWNER_ADMIN_EMAIL) admin.email = OWNER_ADMIN_EMAIL;
-  if (!verifyPassword(OWNER_ADMIN_PASSWORD, admin.passwordHash)) admin.passwordHash = hashPassword(OWNER_ADMIN_PASSWORD);
   admin.status = "ACTIVE";
   admin.updatedAt = timestamp;
   if (!db.adminUsers.some((item) => item.userId === admin.id)) db.adminUsers.push({ id: id("adm"), userId: admin.id, createdAt: timestamp });
@@ -440,7 +441,6 @@ function syncOwnerCustomerAndTechnician(db) {
     customer = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_CUSTOMER_TECH_PASSWORD), role: roles.CUSTOMER, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
     db.users.push(customer);
   }
-  if (!verifyPassword(OWNER_CUSTOMER_TECH_PASSWORD, customer.passwordHash)) customer.passwordHash = hashPassword(OWNER_CUSTOMER_TECH_PASSWORD);
   customer.status = "ACTIVE";
   customer.updatedAt = timestamp;
   if (!db.customerProfiles.some((profile) => profile.userId === customer.id)) {
@@ -452,7 +452,6 @@ function syncOwnerCustomerAndTechnician(db) {
     tech = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_CUSTOMER_TECH_PASSWORD), role: roles.TECHNICIAN, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
     db.users.push(tech);
   }
-  if (!verifyPassword(OWNER_CUSTOMER_TECH_PASSWORD, tech.passwordHash)) tech.passwordHash = hashPassword(OWNER_CUSTOMER_TECH_PASSWORD);
   tech.status = "ACTIVE";
   tech.updatedAt = timestamp;
   let profile = db.technicianProfiles.find((item) => item.userId === tech.id);
@@ -532,6 +531,14 @@ function parseCookies(req) {
 function send(res, status, data, headers = {}) {
   res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(data));
+}
+
+function requestBaseUrl(req) {
+  const configured = process.env.APP_BASE_URL;
+  if (configured) return configured.replace(/\/$/, "");
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`.replace(/\/$/, "");
 }
 
 function error(res, status, message) {
@@ -745,10 +752,13 @@ async function api(req, res, db) {
 
   if (req.method === "POST" && url.pathname === "/api/auth/password-reset") {
     const email = sanitize(body.email).toLowerCase();
-    const user = db.users.find((item) => item.email === email && item.status === "ACTIVE");
+    const requestedRole = sanitize(body.role).toUpperCase();
+    const role = [roles.CUSTOMER, roles.TECHNICIAN, roles.ADMIN].includes(requestedRole) ? requestedRole : "";
+    const matches = db.users.filter((item) => item.email === email && item.status === "ACTIVE");
+    const user = role ? matches.find((item) => item.role === role) : matches.find((item) => item.role !== roles.ADMIN) || matches[0];
     if (!user) return send(res, 200, { ok: true, message: "If that account exists, a password reset email will be sent." });
     const token = crypto.randomBytes(32).toString("hex");
-    const resetUrl = `${APP_BASE_URL.replace(/\/$/, "")}/?resetToken=${token}`;
+    const resetUrl = `${requestBaseUrl(req)}/?resetToken=${token}`;
     db.passwordResetTokens = db.passwordResetTokens.filter((item) => item.userId !== user.id || item.usedAt);
     db.passwordResetTokens.push({
       id: id("prt"),
@@ -763,7 +773,7 @@ async function api(req, res, db) {
     saveDb(db);
     return send(res, 200, {
       ok: true,
-      message: emailResult.sent ? "Password reset email sent." : "Password reset link created. Add EMAIL_PROVIDER_API_KEY in Render to send real emails.",
+      message: emailResult.sent ? "Password reset email sent." : "Password reset link created, but email sending is not working yet. Check Render email environment variables and logs.",
       resetUrl: emailResult.sent ? undefined : resetUrl
     });
   }

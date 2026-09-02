@@ -97,6 +97,7 @@ function showShell() {
   }
   $$(".public-action").forEach((button) => button.classList.toggle("hidden", Boolean(state.user)));
   $$(".app-action").forEach((button) => button.classList.toggle("hidden", !state.user));
+  $$("[data-view=admin]").forEach((button) => button.classList.toggle("hidden", state.user?.role !== "ADMIN"));
   $("#logoutBtn").classList.toggle("hidden", !state.user);
   if (state.user) {
     $("#userBadge").innerHTML = `<div>${state.user.email}</div><p class="fineprint">${state.user.role}</p>`;
@@ -527,15 +528,15 @@ $("#ownerLoginBtn").addEventListener("click", () => {
   $("#loginRole").value = "ADMIN";
   updateOwnerCodeVisibility();
   $("#ownerCodeField").classList.remove("hidden");
-  $("#loginForm [name=email]").value = "georgegoss17@gmail.com";
   $("#loginForm [name=password]").value = "";
   toast("Enter your private owner access code to open admin controls.");
 });
 
 $("#resetPasswordBtn").addEventListener("click", async () => {
   const email = $("#loginForm [name=email]").value;
+  const role = $("#loginRole").value;
   try {
-    const out = await api("/api/auth/password-reset", { method: "POST", body: { email } });
+    const out = await api("/api/auth/password-reset", { method: "POST", body: { email, role } });
     if (out.resetUrl) {
       toast(`${out.message} Local test link: ${out.resetUrl}`);
       console.log("Password reset link:", out.resetUrl);
