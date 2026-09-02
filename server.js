@@ -319,6 +319,33 @@ async function sendPasswordResetEmail(user, resetUrl) {
   return { sent: true, provider: "RESEND" };
 }
 
+async function sendNotificationEmail(user, title, body) {
+  if (!user?.email) return { sent: false, provider: "NO_EMAIL" };
+  if (!process.env.EMAIL_PROVIDER_API_KEY) {
+    console.log(`[notification-email] Email provider not configured. ${user.email}: ${title} - ${body}`);
+    return { sent: false, provider: "LOCAL_LOG" };
+  }
+  const from = process.env.EMAIL_FROM || "WrenchLane <onboarding@resend.dev>";
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.EMAIL_PROVIDER_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from,
+      to: [user.email],
+      subject: `WrenchLane: ${title}`,
+      text: `${body}\n\nOpen WrenchLane to view the latest details.`
+    })
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`Email provider rejected the notification email: ${details}`);
+  }
+  return { sent: true, provider: "RESEND" };
+}
+
 function signedSessionValue(sessionId) {
   const sig = crypto.createHmac("sha256", SESSION_SECRET).update(sessionId).digest("hex");
   return `${sessionId}.${sig}`;
@@ -558,6 +585,8 @@ function addAudit(db, actorUserId, action, entityType, entityId, metadata = {}) 
 
 function notify(db, userId, type, title, body) {
   db.notifications.push({ id: id("not"), userId, type, title, body, readAt: null, createdAt: now() });
+  const user = db.users.find((item) => item.id === userId && item.status === "ACTIVE");
+  sendNotificationEmail(user, title, body).catch((err) => console.error(`[notification-email] ${err.message}`));
 }
 
 function visibleReviews(db, technicianId) {
@@ -826,11 +855,46 @@ async function api(req, res, db) {
   if (req.method === "POST" && url.pathname === "/api/vehicles") {
     const user = requireUser(req, res, db, [roles.CUSTOMER]);
     if (!user) return;
-    const vehicle = { id: id("veh"), customerId: user.id, year: Number(body.year), make: sanitize(body.make), model: sanitize(body.model), engine: sanitize(body.engine), mileage: Number(body.mileage || 0), vin: sanitize(body.vin), createdAt: now(), updatedAt: now() };
+    const vehicle = { id: id("veh"), customerId: user.id, year: Number(body.year), make: sanitize(body.make), model: sanitize(body.model), engine: sanitize(body.engine), mileage: Number(body.mileage || 0), vin: sanitize(body.vin), plate: sanitize(body.plate), color: sanitize(body.color), createdAt: now(), updatedAt: now() };
     if (!vehicle.year || !vehicle.make || !vehicle.model) return error(res, 400, "Vehicle year, make, and model are required.");
     db.vehicles.push(vehicle);
     saveDb(db);
     return send(res, 201, { vehicle });
+  }
+
+  if (req.method === "PUT" && url.pathname === "/api/customer/profile") {
+    const user = requireUser(req, res, db, [roles.CUSTOMER]);
+    if (!user) return;
+    let profile = db.customerProfiles.find((item) => item.userId === user.id);
+    if (!profile) {
+      profile = { id: id("cus"), userId: user.id, createdAt: now() };
+      db.customerProfiles.push(profile);
+    }
+    profile.fullName = sanitize(body.fullName || profile.fullName || "New Customer");
+    profile.phone = sanitize(body.phone || "");
+    profile.updatedAt = now();
+    saveDb(db);
+    return send(res, 200, { profile });
+  }
+
+  const vehicleUpdate = url.pathname.match(/^\/api\/vehicles\/([^/]+)$/);
+  if (vehicleUpdate && req.method === "PUT") {
+    const user = requireUser(req, res, db, [roles.CUSTOMER]);
+    if (!user) return;
+    const vehicle = db.vehicles.find((item) => item.id === vehicleUpdate[1] && item.customerId === user.id);
+    if (!vehicle) return error(res, 404, "Vehicle not found.");
+    vehicle.year = Number(body.year || vehicle.year);
+    vehicle.make = sanitize(body.make || vehicle.make);
+    vehicle.model = sanitize(body.model || vehicle.model);
+    vehicle.engine = sanitize(body.engine || "");
+    vehicle.mileage = Number(body.mileage || 0);
+    vehicle.vin = sanitize(body.vin || "");
+    vehicle.plate = sanitize(body.plate || "");
+    vehicle.color = sanitize(body.color || "");
+    vehicle.updatedAt = now();
+    if (!vehicle.year || !vehicle.make || !vehicle.model) return error(res, 400, "Vehicle year, make, and model are required.");
+    saveDb(db);
+    return send(res, 200, { vehicle });
   }
 
   if (req.method === "GET" && url.pathname === "/api/vehicles") {
@@ -865,13 +929,61 @@ async function api(req, res, db) {
       ...booking,
       vehicle: db.vehicles.find((item) => item.id === booking.vehicleId),
       service: db.services.find((item) => item.id === booking.serviceId),
+      location: db.locations.find((item) => item.id === booking.locationId),
       technicianProfile: db.technicianProfiles.find((item) => item.userId === booking.technicianId),
       quote: db.quotes.find((item) => item.bookingId === booking.id),
       invoice: db.invoices.find((item) => item.bookingId === booking.id),
       additionalWorkRequests: db.additionalWorkRequests.filter((item) => item.bookingId === booking.id),
-      inspectionFindings: db.inspectionFindings.filter((item) => item.bookingId === booking.id)
+      inspectionFindings: db.inspectionFindings.filter((item) => item.bookingId === booking.id),
+      messages: db.messages.filter((item) => item.bookingId === booking.id)
     }));
     return send(res, 200, { bookings });
+  }
+
+  const bookingUpdate = url.pathname.match(/^\/api\/bookings\/([^/]+)$/);
+  if (bookingUpdate && req.method === "PUT") {
+    const user = requireUser(req, res, db, [roles.CUSTOMER]);
+    if (!user) return;
+    const booking = db.bookings.find((item) => item.id === bookingUpdate[1] && item.customerId === user.id);
+    if (!booking) return error(res, 404, "Booking not found.");
+    if (!["REQUESTED", "BOOKED", "QUOTED", "AWAITING_CUSTOMER_APPROVAL"].includes(booking.status)) return error(res, 409, "This booking can no longer be edited.");
+    const quote = db.quotes.find((item) => item.bookingId === booking.id && item.status === "APPROVED");
+    if (quote) return error(res, 409, "This booking has an approved quote and can no longer be edited.");
+
+    const vehicle = db.vehicles.find((item) => item.id === body.vehicleId && item.customerId === user.id);
+    const service = db.services.find((item) => item.id === body.serviceId && item.active !== false);
+    const technician = db.users.find((item) => item.id === body.technicianId && item.role === roles.TECHNICIAN && item.status === "ACTIVE");
+    const location = db.locations.find((item) => item.id === booking.locationId);
+    if (!vehicle || !service || !technician || !location) return error(res, 400, "Choose a valid vehicle, service, and technician.");
+    const updatedLocation = {
+      ...location,
+      address: sanitize(body.address),
+      city: sanitize(body.city),
+      region: sanitize(body.region),
+      postalCode: sanitize(body.postalCode)
+    };
+    if (!updatedLocation.address) return error(res, 400, "Enter the service address.");
+    if (!technicianMatches(db, technician.id, service, updatedLocation)) return error(res, 400, "That technician is not approved or does not match this service.");
+    if (isDoubleBooked(db, technician.id, body.preferredAt, booking.id)) return error(res, 409, "That technician is already booked near that time.");
+
+    const previousTechnicianId = booking.technicianId;
+    Object.assign(location, updatedLocation);
+    booking.vehicleId = vehicle.id;
+    booking.serviceId = service.id;
+    booking.technicianId = technician.id;
+    booking.serviceMode = body.serviceMode === "SHOP" ? "SHOP" : "MOBILE";
+    booking.preferredAt = body.preferredAt;
+    booking.symptoms = sanitize(body.symptoms);
+    booking.dtcs = sanitize(body.dtcs);
+    booking.updatedAt = now();
+    if (["QUOTED", "AWAITING_CUSTOMER_APPROVAL"].includes(booking.status)) {
+      db.quotes = db.quotes.filter((item) => item.bookingId !== booking.id);
+      booking.status = "REQUESTED";
+    }
+    notify(db, technician.id, "BOOKING_UPDATED", "Customer updated booking", `${service.name} for ${vehicle.year} ${vehicle.make} ${vehicle.model}.`);
+    if (previousTechnicianId !== technician.id) notify(db, previousTechnicianId, "BOOKING_REASSIGNED", "Customer selected another technician", "A customer changed the technician on a booking.");
+    saveDb(db);
+    return send(res, 200, { booking, location });
   }
 
   if (req.method === "GET" && url.pathname === "/api/jobs/opportunities") {

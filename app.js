@@ -70,6 +70,13 @@ function setPreferredTime() {
   input.value = d.toISOString().slice(0, 16);
 }
 
+function toDateTimeLocal(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 function setAuthTab(name) {
   $$(".auth-tabs button").forEach((button) => button.classList.toggle("active", button.dataset.authTab === name));
   $$(".auth-form").forEach((form) => form.classList.add("hidden"));
@@ -119,20 +126,21 @@ async function refreshBase() {
   showShell();
 }
 
-function serviceOptionsHtml() {
+function serviceOptionsHtml(selectedServiceId = "") {
   const byCategory = new Map(state.categories.map((category) => [category.id, { ...category, services: [] }]));
   for (const service of state.services) {
     if (!byCategory.has(service.categoryId)) byCategory.set(service.categoryId, { id: service.categoryId, name: "Other Services", services: [] });
     byCategory.get(service.categoryId).services.push(service);
   }
   return Array.from(byCategory.values()).map((category) => {
-    const options = category.services.map((service) => `<option value="${service.id}">${escapeHtml(service.name)}</option>`).join("");
+    const options = category.services.map((service) => `<option value="${service.id}" ${service.id === selectedServiceId ? "selected" : ""}>${escapeHtml(service.name)}</option>`).join("");
     return options ? `<optgroup label="${escapeHtml(category.name)}">${options}</optgroup>` : "";
   }).join("");
 }
 
 async function refreshCustomer() {
   if (!state.user || state.user.role !== "CUSTOMER") return;
+  await refreshBaseProfileOnly();
   state.vehicles = (await api("/api/vehicles")).vehicles;
   state.bookings = (await api("/api/bookings")).bookings;
   state.technicians = (await api("/api/technicians")).technicians;
@@ -140,12 +148,37 @@ async function refreshCustomer() {
   $("#bookingHint").classList.toggle("hidden", state.vehicles.length > 0);
   $("#bookingForm button[type=submit]").disabled = state.vehicles.length === 0;
   $("#technicianProfiles").innerHTML = state.technicians.map(renderTechnicianCard).join("") || "<p class='fineprint'>No approved technicians are available yet.</p>";
+  fillCustomerProfileForm();
+  $("#vehicleProfiles").innerHTML = state.vehicles.map(renderVehicleProfile).join("") || "<p class='fineprint'>No vehicles saved yet.</p>";
   $("#vehicleCount").textContent = state.vehicles.length;
   const active = state.bookings.find((b) => !["COMPLETED", "CANCELLED", "REFUNDED"].includes(b.status));
   $("#activeRepair").textContent = active ? active.status.replaceAll("_", " ") : "No active repair";
   $("#upcomingAppointment").textContent = active ? new Date(active.preferredAt).toLocaleString() : "None yet";
   $("#historyCount").textContent = `${state.bookings.filter((b) => b.status === "COMPLETED").length} completed`;
   $("#customerBookings").innerHTML = state.bookings.map(renderCustomerBooking).join("") || "<p class='fineprint'>No bookings yet.</p>";
+}
+
+function fillCustomerProfileForm() {
+  $("#customerFullName").value = state.profile?.fullName || "";
+  $("#customerEmail").value = state.user?.email || "";
+  $("#customerPhone").value = state.profile?.phone || "";
+}
+
+function renderVehicleProfile(vehicle) {
+  return `<details class="edit-booking">
+    <summary>${vehicle.year} ${escapeHtml(vehicle.make)} ${escapeHtml(vehicle.model)}</summary>
+    <form class="mini-form" data-vehicle-edit-form="${vehicle.id}">
+      <label>Year <input name="year" type="number" value="${vehicle.year || ""}" required /></label>
+      <label>Make <input name="make" value="${escapeHtml(vehicle.make || "")}" required /></label>
+      <label>Model <input name="model" value="${escapeHtml(vehicle.model || "")}" required /></label>
+      <label>Engine <input name="engine" value="${escapeHtml(vehicle.engine || "")}" /></label>
+      <label>Mileage <input name="mileage" type="number" value="${vehicle.mileage || 0}" /></label>
+      <label>VIN <input name="vin" value="${escapeHtml(vehicle.vin || "")}" /></label>
+      <label>Plate <input name="plate" value="${escapeHtml(vehicle.plate || "")}" /></label>
+      <label>Color <input name="color" value="${escapeHtml(vehicle.color || "")}" /></label>
+      <button type="submit">Save Vehicle Profile</button>
+    </form>
+  </details>`;
 }
 
 function renderTechnicianCard(t) {
@@ -212,6 +245,7 @@ function refreshTechnicianProfilePage() {
 function renderCustomerBooking(b) {
   const quoteActions = b.quote && b.quote.status === "PENDING" ? `<button data-approve-quote="${b.id}">Approve ${money(b.quote.amountCents)}</button>` : "";
   const reviewAction = b.status === "COMPLETED" && !b.review ? `<button data-review="${b.id}">Leave Review</button>` : "";
+  const editForm = renderBookingEditForm(b);
   const additions = (b.additionalWorkRequests || []).map((item) => `<div class="item">
     <p><strong>Suggested repair:</strong> ${escapeHtml(item.description)}</p>
     <p class="meta">${money(item.amountCents)} - ${item.status}</p>
@@ -227,15 +261,63 @@ function renderCustomerBooking(b) {
     ${b.technicianProfile.profilePhotoUrl ? `<img class="avatar" src="${b.technicianProfile.profilePhotoUrl}" alt="${escapeHtml(b.technicianProfile.fullName)}" />` : `<div class="avatar">WL</div>`}
     <div><strong>${escapeHtml(b.technicianProfile.fullName)}</strong><p class="meta">${b.technicianProfile.yearsExperience || 0} years - ${escapeHtml((b.technicianProfile.specialties || []).join(", "))}</p><p class="fineprint">${escapeHtml(b.technicianProfile.bio || "")}</p></div>
   </div>` : "";
+  const chat = renderBookingChat(b);
   return `<article class="item">
     <div class="item-head"><div><strong>${b.service.name}</strong><p class="meta">${b.vehicle.year} ${b.vehicle.make} ${b.vehicle.model} at ${new Date(b.preferredAt).toLocaleString()}</p></div><span class="status">${b.status}</span></div>
     ${tech}
     <p>${b.symptoms || "No symptoms provided."}</p>
+    ${editForm}
     ${b.invoice ? `<p><strong>Invoice:</strong> ${money(b.invoice.totalCents)} | Platform fee ${money(b.invoice.platformFeeCents)} | Technician ${money(b.invoice.technicianEarningsCents)}</p>` : ""}
     ${findings}
     ${additions}
+    ${chat}
     <div class="actions">${quoteActions}${reviewAction}</div>
   </article>`;
+}
+
+function renderBookingChat(b) {
+  const messages = (b.messages || []).map((message) => {
+    const mine = message.senderId === state.user?.id;
+    return `<div class="chat-message ${mine ? "mine" : ""}">
+      <strong>${mine ? "You" : "Them"}</strong>
+      <p>${escapeHtml(message.body)}</p>
+      <span>${new Date(message.createdAt).toLocaleString()}</span>
+    </div>`;
+  }).join("");
+  return `<section class="chat-box">
+    <h3>Live Chat</h3>
+    <div class="chat-log">${messages || "<p class='fineprint'>No messages yet.</p>"}</div>
+    <form class="comment-form" data-chat-form="${b.id}">
+      <input name="body" placeholder="Type a message" />
+      <button type="submit">Send</button>
+    </form>
+  </section>`;
+}
+
+function renderBookingEditForm(b) {
+  if (!["REQUESTED", "BOOKED", "QUOTED", "AWAITING_CUSTOMER_APPROVAL"].includes(b.status) || b.quote?.status === "APPROVED") return "";
+  const vehicleOptions = state.vehicles.map((vehicle) => `<option value="${vehicle.id}" ${vehicle.id === b.vehicleId ? "selected" : ""}>${vehicle.year} ${escapeHtml(vehicle.make)} ${escapeHtml(vehicle.model)}</option>`).join("");
+  const techOptions = state.technicians.map((tech) => `<option value="${tech.userId}" ${tech.userId === b.technicianId ? "selected" : ""}>${escapeHtml(tech.fullName)} - ${tech.ratingAverage || "New"} stars</option>`).join("");
+  return `<details class="edit-booking">
+    <summary>Edit booking</summary>
+    <form class="mini-form" data-booking-edit-form="${b.id}">
+      <label>Vehicle <select name="vehicleId">${vehicleOptions}</select></label>
+      <label>Service <select name="serviceId">${serviceOptionsHtml(b.serviceId)}</select></label>
+      <label>Technician <select name="technicianId">${techOptions}</select></label>
+      <label>Service mode
+        <select name="serviceMode">
+          <option value="MOBILE" ${b.serviceMode === "MOBILE" ? "selected" : ""}>Mobile service</option>
+          <option value="SHOP" ${b.serviceMode === "SHOP" ? "selected" : ""}>Shop service</option>
+        </select>
+      </label>
+      <label>Preferred time <input name="preferredAt" type="datetime-local" value="${toDateTimeLocal(b.preferredAt)}" required /></label>
+      <label>Address <input name="address" value="${escapeHtml(b.location?.address || "")}" required /></label>
+      <label>Describe what you need done <textarea name="symptoms">${escapeHtml(b.symptoms || "")}</textarea></label>
+      <label>DTCs <input name="dtcs" value="${escapeHtml(b.dtcs || "")}" /></label>
+      <button type="submit">Save Booking Changes</button>
+      <p class="fineprint">Editing after a quote is sent will send the request back to the technician for review.</p>
+    </form>
+  </details>`;
 }
 
 async function refreshTechnician() {
@@ -308,10 +390,12 @@ function renderTechJob(b) {
     <button type="submit">Upload Finding</button>
   </form>` : "";
   const existingFindings = (b.inspectionFindings || []).map((finding) => `<div class="item"><strong>${escapeHtml(finding.title)}</strong><p>${escapeHtml(finding.notes)}</p>${finding.photoUrls?.length ? `<div class="finding-gallery">${finding.photoUrls.map((src) => `<img src="${src}" alt="Finding" />`).join("")}</div>` : ""}</div>`).join("");
+  const chat = renderBookingChat(b);
   return `<article class="item">
     <div class="item-head"><div><strong>${b.service.name}</strong><p class="meta">${b.vehicle.year} ${b.vehicle.make} ${b.vehicle.model} - ${b.dtcs || "No DTCs"}</p></div><span class="status">${b.status}</span></div>
     <p>${b.symptoms}</p>
     ${accept}${quote}${findings}${existingFindings}
+    ${chat}
     <div class="actions">${start}${add}${done}</div>
   </article>`;
 }
@@ -496,6 +580,12 @@ $("#vehicleForm").addEventListener("submit", async (e) => {
   try { await api("/api/vehicles", { method: "POST", body }); await refreshCustomer(); toast("Vehicle saved."); } catch (err) { toast(err.message); }
 });
 
+$("#customerProfileForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.currentTarget).entries());
+  try { await api("/api/customer/profile", { method: "PUT", body }); await refreshCustomer(); toast("Customer profile saved."); } catch (err) { toast(err.message); }
+});
+
 $("#techProfileForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = e.currentTarget;
@@ -552,6 +642,29 @@ document.body.addEventListener("submit", async (e) => {
       form.reset();
       await refreshTechnician();
       toast("Additional repair sent to customer.");
+    }
+    if (form.dataset.bookingEditForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/bookings/${form.dataset.bookingEditForm}`, { method: "PUT", body });
+      await refreshCustomer();
+      toast("Booking updated.");
+    }
+    if (form.dataset.vehicleEditForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/vehicles/${form.dataset.vehicleEditForm}`, { method: "PUT", body });
+      await refreshCustomer();
+      toast("Vehicle profile saved.");
+    }
+    if (form.dataset.chatForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/bookings/${form.dataset.chatForm}/message`, { method: "POST", body });
+      form.reset();
+      if (state.user?.role === "TECHNICIAN") await refreshTechnician();
+      else await refreshCustomer();
+      toast("Message sent.");
     }
     if (form.dataset.commentForm) {
       e.preventDefault();
@@ -637,6 +750,16 @@ $("#bookButton").addEventListener("click", () => $("#bookingForm").scrollIntoVie
 $("#findJobs").addEventListener("click", refreshTechnician);
 $("#backToTechnicians").addEventListener("click", () => switchView("customer"));
 
+async function refreshCurrentView() {
+  if (!state.user) return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
+  if (!document.hidden) {
+    if (state.user.role === "CUSTOMER") await refreshCustomer();
+    if (state.user.role === "TECHNICIAN") await refreshTechnician();
+    if (state.user.role === "ADMIN") await refreshAdmin();
+  }
+}
+
 setPreferredTime();
 setAuthTab("signup");
 const resetToken = new URLSearchParams(location.search).get("resetToken");
@@ -644,3 +767,4 @@ if (resetToken) {
   $("#newPasswordForm [name=token]").value = resetToken;
 }
 refreshBase().catch(() => showShell());
+setInterval(() => refreshCurrentView().catch((err) => console.warn("Auto refresh failed", err)), 60 * 1000);
