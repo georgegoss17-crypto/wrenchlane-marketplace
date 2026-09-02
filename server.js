@@ -8,8 +8,10 @@ const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || "0.0.0.0";
 const ROOT = __dirname;
 const PUBLIC_DIR = ROOT;
-const DEFAULT_DATA_DIR = process.env.RENDER || fs.existsSync("/var/data") ? "/var/data" : path.join(ROOT, "data");
-const DATA_DIR = process.env.DATA_DIR || DEFAULT_DATA_DIR;
+const LOCAL_DATA_DIR = path.join(ROOT, "data");
+const DEFAULT_DATA_DIR = process.env.RENDER || fs.existsSync("/var/data") ? "/var/data" : LOCAL_DATA_DIR;
+const REQUESTED_DATA_DIR = process.env.DATA_DIR || DEFAULT_DATA_DIR;
+const DATA_DIR = resolveDataDir(REQUESTED_DATA_DIR);
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(DATA_DIR, "backups");
 const SESSION_SECRET = process.env.SESSION_SECRET || "local-development-secret-change-before-production";
 const MIN_FLAT_RATE_CENTS_PER_HOUR = 10000;
@@ -20,6 +22,19 @@ const ADMIN_ACCESS_CODE = process.env.ADMIN_ACCESS_CODE || "2825966745370125";
 const CUSTOMER_TERMS_VERSION = "customer-repair-authorization-v1";
 const TECHNICIAN_TERMS_VERSION = "technician-service-standards-v1";
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
+
+function resolveDataDir(requestedDir) {
+  try {
+    fs.mkdirSync(requestedDir, { recursive: true });
+    fs.accessSync(requestedDir, fs.constants.W_OK);
+    return requestedDir;
+  } catch (err) {
+    console.warn(`[storage] Could not write to ${requestedDir}: ${err.message}`);
+    console.warn(`[storage] Falling back to ${LOCAL_DATA_DIR}. Add or repair the Render persistent disk at /var/data to preserve live data across deploys.`);
+    fs.mkdirSync(LOCAL_DATA_DIR, { recursive: true });
+    return LOCAL_DATA_DIR;
+  }
+}
 
 const roles = {
   CUSTOMER: "CUSTOMER",
