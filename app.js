@@ -245,7 +245,7 @@ function refreshTechnicianProfilePage() {
 
 function renderCustomerBooking(b) {
   const quoteActions = b.quote && b.quote.status === "PENDING" ? `<button data-approve-quote="${b.id}">Approve ${money(b.quote.amountCents)}</button>` : "";
-  const reviewAction = b.status === "COMPLETED" && !b.review ? `<button data-review="${b.id}">Leave Review</button>` : "";
+  const reviewPanel = renderCustomerReviewPanel(b);
   const editForm = renderBookingEditForm(b);
   const additions = (b.additionalWorkRequests || []).map((item) => `<div class="item">
     <p><strong>Suggested repair:</strong> ${escapeHtml(item.description)}</p>
@@ -272,8 +272,37 @@ function renderCustomerBooking(b) {
     ${findings}
     ${additions}
     ${chat}
-    <div class="actions">${quoteActions}${reviewAction}</div>
+    ${reviewPanel}
+    <div class="actions">${quoteActions}</div>
   </article>`;
+}
+
+function renderCustomerReviewPanel(b) {
+  if (b.status !== "COMPLETED") return "";
+  if (b.review) {
+    return `<section class="review-panel">
+      <h3>Your Review</h3>
+      <p><strong>${b.review.rating} stars</strong></p>
+      <p>${escapeHtml(b.review.body || "No review comment.")}</p>
+      <p class="fineprint">This review is posted on the technician profile.</p>
+    </section>`;
+  }
+  return `<section class="review-panel">
+    <h3>Leave a Review</h3>
+    <form class="mini-form review-form" data-review-form="${b.id}">
+      <label>Star rating
+        <select name="rating" required>
+          <option value="5">5 stars</option>
+          <option value="4">4 stars</option>
+          <option value="3">3 stars</option>
+          <option value="2">2 stars</option>
+          <option value="1">1 star</option>
+        </select>
+      </label>
+      <label>Review comment <textarea name="body" placeholder="Tell other customers about this technician"></textarea></label>
+      <button type="submit">Post Review</button>
+    </form>
+  </section>`;
 }
 
 function renderBookingChat(b) {
@@ -392,9 +421,16 @@ function renderTechJob(b) {
   </form>` : "";
   const existingFindings = (b.inspectionFindings || []).map((finding) => `<div class="item"><strong>${escapeHtml(finding.title)}</strong><p>${escapeHtml(finding.notes)}</p>${finding.photoUrls?.length ? `<div class="finding-gallery">${finding.photoUrls.map((src) => `<img src="${src}" alt="Finding" />`).join("")}</div>` : ""}</div>`).join("");
   const chat = renderBookingChat(b);
+  const customerContact = b.customerContactAvailable ? `<div class="privacy-box">
+    <strong>Booked customer contact</strong>
+    <p class="meta">${escapeHtml(b.customerProfile?.fullName || "Customer")} - ${escapeHtml(b.customer?.email || "No email listed")} - ${escapeHtml(b.customerProfile?.phone || "No phone listed")}</p>
+    <p class="meta">${escapeHtml(b.location?.address || "")}${b.location?.city ? `, ${escapeHtml(b.location.city)}` : ""}${b.location?.region ? `, ${escapeHtml(b.location.region)}` : ""} ${escapeHtml(b.location?.postalCode || "")}</p>
+    <p class="meta">VIN: ${escapeHtml(b.vehicle?.vin || "Not listed")} - Plate: ${escapeHtml(b.vehicle?.plate || "Not listed")}</p>
+  </div>` : `<p class="fineprint">Customer contact, exact address, VIN, and plate stay private until the appointment is booked.</p>`;
   return `<article class="item">
     <div class="item-head"><div><strong>${b.service.name}</strong><p class="meta">${b.vehicle.year} ${b.vehicle.make} ${b.vehicle.model} - ${b.dtcs || "No DTCs"}</p></div><span class="status">${b.status}</span></div>
     <p>${b.symptoms}</p>
+    ${customerContact}
     ${accept}${quote}${findings}${existingFindings}
     ${chat}
     <div class="actions">${start}${add}${done}</div>
@@ -429,7 +465,27 @@ async function refreshAdmin() {
   $("#adminMetrics").innerHTML = labels.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("");
   document.querySelector("[name=platformCommissionPercent]").value = state.admin.commissionPercent;
   $("#adminTechnicianApplications").innerHTML = (state.admin.pendingTechnicians || []).map(renderAdminTechnicianApplication).join("") || "<p class='fineprint'>No technician applications waiting right now.</p>";
+  $("#adminCustomerAccounts").innerHTML = (state.admin.customers || []).map(renderAdminCustomerAccount).join("") || "<p class='fineprint'>No customer accounts yet.</p>";
   $("#adminReviewDisputes").innerHTML = (state.admin.reviewDisputes || []).map(renderAdminReviewDispute).join("") || "<p class='fineprint'>No review disputes need a decision.</p>";
+  renderAdminStorageAndLogs();
+}
+
+function renderAdminStorageAndLogs() {
+  const storage = state.admin.storage || {};
+  $("#adminStorageStatus").innerHTML = `<article class="item">
+    <strong>${storage.persistentDiskExpected ? "Persistent storage path detected" : "Check Render persistent disk settings"}</strong>
+    <p class="meta">Data: ${escapeHtml(storage.dataDir || "Unknown")}</p>
+    <p class="meta">Database: ${escapeHtml(storage.databaseFile || "Unknown")}</p>
+    <p class="meta">Backups kept: ${storage.backupCount || 0}</p>
+  </article>`;
+  const logs = [...(state.admin.recentLogs || []), ...(state.admin.recentNotifications || [])]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 20);
+  $("#adminRecentLogs").innerHTML = logs.map((log) => `<article class="item">
+    <strong>${escapeHtml(log.action || log.type || "Log")}</strong>
+    <p>${escapeHtml(log.title || log.body || log.entityType || "")}</p>
+    <p class="meta">${new Date(log.createdAt).toLocaleString()}</p>
+  </article>`).join("") || "<p class='fineprint'>No recent logs yet.</p>";
 }
 
 function renderAdminTechnicianApplication(profile) {
@@ -451,6 +507,38 @@ function renderAdminTechnicianApplication(profile) {
       <button type="button" data-tech-approval="${profile.userId}:APPROVED">Approve</button>
       <button type="button" class="ghost" data-tech-approval="${profile.userId}:DENIED">Deny</button>
     </div>
+  </article>`;
+}
+
+function renderAdminCustomerAccount(customer) {
+  const name = customer.profile?.fullName || "Customer";
+  const details = `${customer.vehicleCount || 0} vehicles - ${customer.bookingCount || 0} bookings`;
+  const disabled = customer.status === "DELETED";
+  return `<article class="item">
+    <div class="item-head">
+      <div>
+        <strong>${escapeHtml(name)}</strong>
+        <p class="meta">${escapeHtml(customer.email)} - ${escapeHtml(customer.statusLabel || customer.status)}</p>
+      </div>
+      <span class="status">${details}</span>
+    </div>
+    <p class="fineprint">Last booking: ${customer.lastBookingAt ? new Date(customer.lastBookingAt).toLocaleString() : "None yet"}</p>
+    <form class="mini-form" data-customer-status-form="${customer.id}">
+      <label>Reason <input name="reason" placeholder="Reason for this account action" /></label>
+      <label>Suspend
+        <select name="days">
+          <option value="5">5 days</option>
+          <option value="15">15 days</option>
+          <option value="30">30 days</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button name="action" value="SUSPEND" type="submit" ${disabled ? "disabled" : ""}>Suspend</button>
+        <button name="action" value="BLOCK" type="submit" class="ghost" ${disabled ? "disabled" : ""}>Block</button>
+        <button name="action" value="DELETE" type="submit" class="ghost">Delete</button>
+        <button name="action" value="ACTIVATE" type="submit" class="ghost">Reactivate</button>
+      </div>
+    </form>
   </article>`;
 }
 
@@ -667,6 +755,15 @@ document.body.addEventListener("submit", async (e) => {
       else await refreshCustomer();
       toast("Message sent.");
     }
+    if (form.dataset.reviewForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      body.rating = Number(body.rating);
+      await api(`/api/bookings/${form.dataset.reviewForm}/review`, { method: "POST", body });
+      state.technicians = (await api("/api/technicians")).technicians;
+      await refreshCustomer();
+      toast("Review posted to the technician profile.");
+    }
     if (form.dataset.commentForm) {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(form).entries());
@@ -693,6 +790,16 @@ document.body.addEventListener("submit", async (e) => {
       await refreshAdmin();
       toast(body.decision === "REMOVE" ? "Review removed." : "Review kept.");
     }
+    if (form.dataset.customerStatusForm) {
+      e.preventDefault();
+      const submitter = e.submitter;
+      const body = Object.fromEntries(new FormData(form).entries());
+      body.customerId = form.dataset.customerStatusForm;
+      body.action = submitter?.value || body.action;
+      await api("/api/admin/customers/status", { method: "POST", body });
+      await refreshAdmin();
+      toast("Customer account updated.");
+    }
   } catch (err) {
     toast(err.message);
   }
@@ -712,7 +819,6 @@ document.body.addEventListener("click", async (e) => {
     }
     if (target.dataset.addApprove) { await api(`/api/additional-work/${target.dataset.addApprove}/approve`, { method: "POST" }); handled = true; }
     if (target.dataset.addDecline) { await api(`/api/additional-work/${target.dataset.addDecline}/decline`, { method: "POST" }); handled = true; }
-    if (target.dataset.review) { await api(`/api/bookings/${target.dataset.review}/review`, { method: "POST", body: { rating: 5, body: "Professional work and clear communication." } }); handled = true; }
     if (target.dataset.techApproval) {
       const [technicianId, status] = target.dataset.techApproval.split(":");
       await api("/api/admin/technicians/approve", { method: "POST", body: { technicianId, status } });

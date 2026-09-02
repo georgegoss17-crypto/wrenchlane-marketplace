@@ -320,6 +320,27 @@ textarea { min-height: 92px; resize: vertical; }
   color: var(--muted);
   font-size: 0.76rem;
 }
+.privacy-box {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #f3b436;
+  border-radius: 8px;
+  background: #fff8e8;
+  padding: 10px;
+}
+.review-panel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.review-panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.review-form textarea {
+  grid-column: span 2;
+}
 .list { display: grid; gap: 10px; }
 .item {
   border: 1px solid var(--line);

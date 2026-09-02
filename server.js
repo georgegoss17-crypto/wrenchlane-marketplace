@@ -8,7 +8,9 @@ const PORT = Number(process.env.PORT || 4173);
 const HOST = process.env.HOST || "0.0.0.0";
 const ROOT = __dirname;
 const PUBLIC_DIR = ROOT;
-const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
+const DEFAULT_DATA_DIR = process.env.RENDER || fs.existsSync("/var/data") ? "/var/data" : path.join(ROOT, "data");
+const DATA_DIR = process.env.DATA_DIR || DEFAULT_DATA_DIR;
+const BACKUP_DIR = process.env.BACKUP_DIR || path.join(DATA_DIR, "backups");
 const SESSION_SECRET = process.env.SESSION_SECRET || "local-development-secret-change-before-production";
 const MIN_FLAT_RATE_CENTS_PER_HOUR = 10000;
 const OWNER_ADMIN_EMAIL = (process.env.OWNER_ADMIN_EMAIL || "georgegoss17@gmail.com").toLowerCase();
@@ -168,6 +170,10 @@ function now() {
   return new Date().toISOString();
 }
 
+function addDays(days) {
+  return new Date(Date.now() + Number(days) * 86400 * 1000).toISOString();
+}
+
 function id(prefix) {
   return `${prefix}_${crypto.randomBytes(10).toString("hex")}`;
 }
@@ -292,8 +298,9 @@ function hashToken(token) {
 }
 
 async function sendPasswordResetEmail(user, resetUrl) {
-  const subject = "Reset your WrenchLane password";
-  const text = `Use this secure link to reset your WrenchLane password. This link expires in 1 hour.\n\n${resetUrl}`;
+  const roleLabel = user.role === roles.TECHNICIAN ? "technician" : user.role === roles.ADMIN ? "owner/admin" : "customer";
+  const subject = `Reset your WrenchLane ${roleLabel} password`;
+  const text = `Use this secure link to reset your WrenchLane ${roleLabel} password. This link expires in 1 hour.\n\n${resetUrl}`;
   if (!process.env.EMAIL_PROVIDER_API_KEY) {
     console.log(`[password-reset] Email provider not configured. Reset link for ${user.email}: ${resetUrl}`);
     return { sent: false, provider: "LOCAL_LOG" };
@@ -441,7 +448,7 @@ function syncOwnerCustomerAndTechnician(db) {
     customer = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_CUSTOMER_TECH_PASSWORD), role: roles.CUSTOMER, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
     db.users.push(customer);
   }
-  customer.status = "ACTIVE";
+  if (!customer.status) customer.status = "ACTIVE";
   customer.updatedAt = timestamp;
   if (!db.customerProfiles.some((profile) => profile.userId === customer.id)) {
     db.customerProfiles.push({ id: id("cus"), userId: customer.id, fullName: "George Goss", phone: "", createdAt: timestamp, updatedAt: timestamp });
@@ -452,7 +459,7 @@ function syncOwnerCustomerAndTechnician(db) {
     tech = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_CUSTOMER_TECH_PASSWORD), role: roles.TECHNICIAN, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
     db.users.push(tech);
   }
-  tech.status = "ACTIVE";
+  if (!tech.status) tech.status = "ACTIVE";
   tech.updatedAt = timestamp;
   let profile = db.technicianProfiles.find((item) => item.userId === tech.id);
   if (!profile) {
@@ -494,27 +501,89 @@ function syncOwnerCustomerAndTechnician(db) {
   profile.updatedAt = timestamp;
 }
 
+function databaseFilePath() {
+  return process.env.DB_FILE || path.join(DATA_DIR, "database.json");
+}
+
+function backupDatabaseFile(dbFile) {
+  if (!fs.existsSync(dbFile)) return;
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupFile = path.join(BACKUP_DIR, `database-${stamp}-${crypto.randomBytes(3).toString("hex")}.json`);
+  fs.copyFileSync(dbFile, backupFile);
+  const backups = fs.readdirSync(BACKUP_DIR)
+    .filter((name) => name.startsWith("database-") && name.endsWith(".json"))
+    .map((name) => ({ name, fullPath: path.join(BACKUP_DIR, name), mtime: fs.statSync(path.join(BACKUP_DIR, name)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+  for (const backup of backups.slice(50)) fs.unlinkSync(backup.fullPath);
+}
+
+function writeJsonSafely(filePath, data) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  backupDatabaseFile(filePath);
+  const tempFile = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  fs.writeFileSync(tempFile, JSON.stringify(data, null, 2));
+  fs.renameSync(tempFile, filePath);
+}
+
 function loadDb() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  const dbFile = process.env.DB_FILE || path.join(DATA_DIR, "database.json");
+  const dbFile = databaseFilePath();
   if (!fs.existsSync(dbFile)) {
     const seeded = normalizeDb(seed(blankDb()));
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
-    fs.writeFileSync(dbFile, JSON.stringify(seeded, null, 2));
+    writeJsonSafely(dbFile, seeded);
     return seeded;
   }
   return normalizeDb(seed(JSON.parse(fs.readFileSync(dbFile, "utf8"))));
 }
 
 function saveDb(db) {
-  const dbFile = process.env.DB_FILE || path.join(DATA_DIR, "database.json");
-  fs.mkdirSync(path.dirname(dbFile), { recursive: true });
-  fs.writeFileSync(dbFile, JSON.stringify(db, null, 2));
+  writeJsonSafely(databaseFilePath(), db);
 }
 
 function publicUser(user) {
   if (!user) return null;
   return { id: user.id, email: user.email, role: user.role, status: user.status };
+}
+
+function privateUser(user) {
+  if (!user) return null;
+  return { id: user.id, role: user.role, status: user.status };
+}
+
+function privateCustomerProfile(profile) {
+  if (!profile) return null;
+  return { id: profile.id, userId: profile.userId, fullName: "Booked customer" };
+}
+
+function privateVehicle(vehicle) {
+  if (!vehicle) return null;
+  return {
+    id: vehicle.id,
+    customerId: vehicle.customerId,
+    year: vehicle.year,
+    make: vehicle.make,
+    model: vehicle.model,
+    engine: vehicle.engine,
+    mileage: vehicle.mileage,
+    color: vehicle.color,
+    createdAt: vehicle.createdAt,
+    updatedAt: vehicle.updatedAt
+  };
+}
+
+function privateLocation(location) {
+  if (!location) return null;
+  return {
+    id: location.id,
+    userId: location.userId,
+    city: location.city,
+    region: location.region,
+    postalCode: location.postalCode,
+    privacyLabel: "PRIVATE_UNTIL_BOOKED",
+    createdAt: location.createdAt
+  };
 }
 
 function sanitize(text) {
@@ -526,6 +595,24 @@ function parseCookies(req) {
     const index = part.indexOf("=");
     return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1))];
   }));
+}
+
+function isAccountActive(user) {
+  if (!user) return false;
+  if (user.status === "ACTIVE") return true;
+  if (user.status === "SUSPENDED" && user.suspendedUntil && user.suspendedUntil <= now()) {
+    user.status = "ACTIVE";
+    user.suspendedUntil = null;
+    user.suspensionReason = "";
+    user.updatedAt = now();
+    return true;
+  }
+  return false;
+}
+
+function accountStatusText(user) {
+  if (user?.status === "SUSPENDED" && user.suspendedUntil) return `SUSPENDED until ${new Date(user.suspendedUntil).toLocaleDateString()}`;
+  return user?.status || "UNKNOWN";
 }
 
 function send(res, status, data, headers = {}) {
@@ -566,7 +653,8 @@ function parseBody(req) {
 function currentUser(req, db) {
   const sessionId = readSessionValue(parseCookies(req).session);
   const session = db.sessions.find((item) => item.id === sessionId && item.expiresAt > now());
-  return session ? db.users.find((user) => user.id === session.userId && user.status === "ACTIVE") : null;
+  const user = session ? db.users.find((item) => item.id === session.userId) : null;
+  return isAccountActive(user) ? user : null;
 }
 
 function requireUser(req, res, db, allowedRoles) {
@@ -592,7 +680,7 @@ function addAudit(db, actorUserId, action, entityType, entityId, metadata = {}) 
 
 function notify(db, userId, type, title, body) {
   db.notifications.push({ id: id("not"), userId, type, title, body, readAt: null, createdAt: now() });
-  const user = db.users.find((item) => item.id === userId && item.status === "ACTIVE");
+  const user = db.users.find((item) => item.id === userId);
   sendNotificationEmail(user, title, body).catch((err) => console.error(`[notification-email] ${err.message}`));
 }
 
@@ -614,6 +702,37 @@ function canTransition(from, to) {
 
 function ownedBooking(user, booking) {
   return booking.customerId === user.id || booking.technicianId === user.id || user.role === roles.ADMIN;
+}
+
+function customerContactAllowed(user, booking) {
+  if (!user || !booking) return false;
+  if (user.role === roles.ADMIN || user.id === booking.customerId) return true;
+  if (user.id !== booking.technicianId) return false;
+  return !["REQUESTED", "QUOTED", "AWAITING_CUSTOMER_APPROVAL", "CANCELLED"].includes(booking.status);
+}
+
+function serializeBooking(db, booking, user) {
+  const canSeeCustomerContact = customerContactAllowed(user, booking);
+  const customer = db.users.find((item) => item.id === booking.customerId);
+  const customerProfile = db.customerProfiles.find((item) => item.userId === booking.customerId);
+  const vehicle = db.vehicles.find((item) => item.id === booking.vehicleId);
+  const location = db.locations.find((item) => item.id === booking.locationId);
+  return {
+    ...booking,
+    customer: canSeeCustomerContact ? publicUser(customer) : privateUser(customer),
+    customerProfile: canSeeCustomerContact ? customerProfile : privateCustomerProfile(customerProfile),
+    vehicle: canSeeCustomerContact ? vehicle : privateVehicle(vehicle),
+    service: db.services.find((item) => item.id === booking.serviceId),
+    location: canSeeCustomerContact ? location : privateLocation(location),
+    technicianProfile: db.technicianProfiles.find((item) => item.userId === booking.technicianId),
+    quote: db.quotes.find((item) => item.bookingId === booking.id),
+    invoice: db.invoices.find((item) => item.bookingId === booking.id),
+    review: db.reviews.find((item) => item.bookingId === booking.id && item.status !== "REMOVED") || null,
+    additionalWorkRequests: db.additionalWorkRequests.filter((item) => item.bookingId === booking.id),
+    inspectionFindings: db.inspectionFindings.filter((item) => item.bookingId === booking.id),
+    messages: db.messages.filter((item) => item.bookingId === booking.id),
+    customerContactAvailable: canSeeCustomerContact
+  };
 }
 
 function technicianMatches(db, technicianUserId, service, location) {
@@ -736,6 +855,7 @@ async function api(req, res, db) {
       ? db.users.find((item) => item.email === email && item.role === role)
       : db.users.find((item) => item.email === email && item.status === "ACTIVE" && item.role !== roles.ADMIN);
     if (!user || !verifyPassword(String(body.password || ""), user.passwordHash)) return error(res, 401, "Invalid email or password.");
+    if (!isAccountActive(user)) return error(res, 403, `This account is ${accountStatusText(user)}. Contact support for help.`);
     if (user.role === roles.ADMIN && sanitize(body.adminAccessCode) !== ADMIN_ACCESS_CODE) return error(res, 403, "Owner access code is required for admin login.");
     const session = { id: id("ses"), userId: user.id, createdAt: now(), expiresAt: new Date(Date.now() + 7 * 86400 * 1000).toISOString() };
     db.sessions.push(session);
@@ -754,7 +874,7 @@ async function api(req, res, db) {
     const email = sanitize(body.email).toLowerCase();
     const requestedRole = sanitize(body.role).toUpperCase();
     const role = [roles.CUSTOMER, roles.TECHNICIAN, roles.ADMIN].includes(requestedRole) ? requestedRole : "";
-    const matches = db.users.filter((item) => item.email === email && item.status === "ACTIVE");
+    const matches = db.users.filter((item) => item.email === email && isAccountActive(item));
     const user = role ? matches.find((item) => item.role === role) : matches.find((item) => item.role !== roles.ADMIN) || matches[0];
     if (!user) return send(res, 200, { ok: true, message: "If that account exists, a password reset email will be sent." });
     const token = crypto.randomBytes(32).toString("hex");
@@ -927,7 +1047,7 @@ async function api(req, res, db) {
     const booking = { id: id("bok"), customerId: user.id, technicianId: technician.id, vehicleId: vehicle.id, serviceId: service.id, locationId: location.id, status: "REQUESTED", serviceMode: body.serviceMode === "SHOP" ? "SHOP" : "MOBILE", preferredAt: body.preferredAt, symptoms: sanitize(body.symptoms), dtcs: sanitize(body.dtcs), mediaUrls: [], createdAt: now(), updatedAt: now() };
     db.locations.push(location);
     db.bookings.push(booking);
-    notify(db, technician.id, "NEW_BOOKING_REQUEST", "New repair request", `${service.name} requested for ${vehicle.year} ${vehicle.make} ${vehicle.model}.`);
+    notify(db, technician.id, "NEW_BOOKING_REQUEST", "New customer request", `${service.name} requested for ${vehicle.year} ${vehicle.make} ${vehicle.model}. Customer note: ${booking.symptoms || "No description provided."}`);
     saveDb(db);
     return send(res, 201, { booking });
   }
@@ -935,18 +1055,7 @@ async function api(req, res, db) {
   if (req.method === "GET" && url.pathname === "/api/bookings") {
     const user = requireUser(req, res, db);
     if (!user) return;
-    const bookings = db.bookings.filter((booking) => ownedBooking(user, booking)).map((booking) => ({
-      ...booking,
-      vehicle: db.vehicles.find((item) => item.id === booking.vehicleId),
-      service: db.services.find((item) => item.id === booking.serviceId),
-      location: db.locations.find((item) => item.id === booking.locationId),
-      technicianProfile: db.technicianProfiles.find((item) => item.userId === booking.technicianId),
-      quote: db.quotes.find((item) => item.bookingId === booking.id),
-      invoice: db.invoices.find((item) => item.bookingId === booking.id),
-      additionalWorkRequests: db.additionalWorkRequests.filter((item) => item.bookingId === booking.id),
-      inspectionFindings: db.inspectionFindings.filter((item) => item.bookingId === booking.id),
-      messages: db.messages.filter((item) => item.bookingId === booking.id)
-    }));
+    const bookings = db.bookings.filter((booking) => ownedBooking(user, booking)).map((booking) => serializeBooking(db, booking, user));
     return send(res, 200, { bookings });
   }
 
@@ -999,7 +1108,7 @@ async function api(req, res, db) {
   if (req.method === "GET" && url.pathname === "/api/jobs/opportunities") {
     const user = requireUser(req, res, db, [roles.TECHNICIAN]);
     if (!user) return;
-    const jobs = db.bookings.filter((booking) => booking.technicianId === user.id && booking.status === "REQUESTED").map((booking) => ({ ...booking, vehicle: db.vehicles.find((item) => item.id === booking.vehicleId), service: db.services.find((item) => item.id === booking.serviceId) }));
+    const jobs = db.bookings.filter((booking) => booking.technicianId === user.id && booking.status === "REQUESTED").map((booking) => serializeBooking(db, booking, user));
     return send(res, 200, { jobs });
   }
 
@@ -1044,7 +1153,8 @@ async function api(req, res, db) {
       db.quotes.push(quote);
       booking.status = "AWAITING_CUSTOMER_APPROVAL";
       booking.updatedAt = now();
-      notify(db, booking.customerId, "QUOTE_READY", "Quote ready", `Your quote is ${money(amountCents)}. Flat-rate jobs pay for the agreed repair scope, not speed.`);
+      const quoteVehicle = db.vehicles.find((item) => item.id === booking.vehicleId);
+      notify(db, booking.customerId, "QUOTE_READY", "Your quote is ready", `The technician sent a quote for ${service?.name || "your repair"} on your ${quoteVehicle ? `${quoteVehicle.year} ${quoteVehicle.make} ${quoteVehicle.model}` : "vehicle"}. Quote amount: ${money(amountCents)}. Log in to approve or review it.`);
       saveDb(db);
       return send(res, 201, { quote, booking });
     }
@@ -1120,7 +1230,9 @@ async function api(req, res, db) {
       const message = { id: id("msg"), bookingId: booking.id, senderId: user.id, body: sanitize(body.body), createdAt: now() };
       if (!message.body) return error(res, 400, "Message cannot be empty.");
       db.messages.push(message);
-      notify(db, user.id === booking.customerId ? booking.technicianId : booking.customerId, "NEW_MESSAGE", "New job message", message.body);
+      const recipientId = user.id === booking.customerId ? booking.technicianId : booking.customerId;
+      const senderLabel = user.id === booking.customerId ? "customer" : "technician";
+      notify(db, recipientId, "NEW_MESSAGE", "You got a response", `Your ${senderLabel} sent a new message: ${message.body}`);
       saveDb(db);
       return send(res, 201, { message });
     }
@@ -1202,6 +1314,16 @@ async function api(req, res, db) {
     const user = requireUser(req, res, db, [roles.ADMIN]);
     if (!user) return;
     const revenue = db.invoices.reduce((sum, invoice) => sum + invoice.platformFeeCents, 0);
+    const customers = db.users.filter((item) => item.role === roles.CUSTOMER).map((customer) => ({
+      ...publicUser(customer),
+      statusLabel: accountStatusText(customer),
+      suspendedUntil: customer.suspendedUntil || null,
+      suspensionReason: customer.suspensionReason || "",
+      profile: db.customerProfiles.find((profile) => profile.userId === customer.id),
+      vehicleCount: db.vehicles.filter((vehicle) => vehicle.customerId === customer.id).length,
+      bookingCount: db.bookings.filter((booking) => booking.customerId === customer.id).length,
+      lastBookingAt: db.bookings.filter((booking) => booking.customerId === customer.id).map((booking) => booking.createdAt).sort().at(-1) || null
+    }));
     const pendingTechnicians = db.technicianProfiles.filter((item) => ["PENDING", "UNDER_REVIEW"].includes(item.verificationStatus)).map((profile) => ({
       ...profile,
       user: publicUser(db.users.find((item) => item.id === profile.userId))
@@ -1223,8 +1345,54 @@ async function api(req, res, db) {
       technicianPayoutsCents: db.payouts.reduce((sum, payout) => sum + payout.amountCents, 0),
       openDisputes: db.disputes.filter((item) => item.status !== "CLOSED").length,
       commissionPercent: Number(setting(db, "platformCommissionPercent", "10")),
-      reviewDisputes
+      reviewDisputes,
+      storage: {
+        dataDir: DATA_DIR,
+        databaseFile: databaseFilePath(),
+        backupDir: BACKUP_DIR,
+        backupCount: fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter((name) => name.endsWith(".json")).length : 0,
+        persistentDiskExpected: DATA_DIR.replace(/\\/g, "/").startsWith("/var/data")
+      },
+      recentLogs: db.auditLogs.slice(-25).reverse(),
+      recentNotifications: db.notifications.slice(-25).reverse(),
+      customers
     });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/customers/status") {
+    const user = requireUser(req, res, db, [roles.ADMIN]);
+    if (!user) return;
+    const customer = db.users.find((item) => item.id === body.customerId && item.role === roles.CUSTOMER);
+    if (!customer) return error(res, 404, "Customer not found.");
+    const action = sanitize(body.action).toUpperCase();
+    const reason = sanitize(body.reason);
+    if (action === "SUSPEND") {
+      const days = Number(body.days);
+      if (![5, 15, 30].includes(days)) return error(res, 400, "Suspension must be 5, 15, or 30 days.");
+      customer.status = "SUSPENDED";
+      customer.suspendedUntil = addDays(days);
+      customer.suspensionReason = reason || `${days} day service suspension`;
+    } else if (action === "BLOCK") {
+      customer.status = "BLOCKED";
+      customer.suspendedUntil = null;
+      customer.suspensionReason = reason || "Blocked by owner/admin";
+    } else if (action === "DELETE") {
+      customer.status = "DELETED";
+      customer.suspendedUntil = null;
+      customer.suspensionReason = reason || "Deleted by owner/admin";
+    } else if (action === "ACTIVATE") {
+      customer.status = "ACTIVE";
+      customer.suspendedUntil = null;
+      customer.suspensionReason = "";
+    } else {
+      return error(res, 400, "Choose delete, block, suspend, or activate.");
+    }
+    customer.updatedAt = now();
+    db.sessions = db.sessions.filter((session) => session.userId !== customer.id);
+    addAudit(db, user.id, `CUSTOMER_${action}`, "User", customer.id, { days: body.days || null, reason });
+    notify(db, customer.id, `CUSTOMER_${action}`, "Account status updated", `Your WrenchLane customer account is now ${accountStatusText(customer)}.`);
+    saveDb(db);
+    return send(res, 200, { customer: publicUser(customer), statusLabel: accountStatusText(customer) });
   }
 
   const adminReviewDispute = url.pathname.match(/^\/api\/admin\/review-disputes\/([^/]+)\/resolve$/);
