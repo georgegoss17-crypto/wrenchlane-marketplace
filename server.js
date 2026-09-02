@@ -1229,6 +1229,61 @@ async function api(req, res, db) {
       return send(res, 200, { booking, quote, payment, stripeRequiredForProduction: !process.env.STRIPE_SECRET_KEY });
     }
 
+    if (req.method === "POST" && action === "decline-quote") {
+      if (user.id !== booking.customerId) return error(res, 403, "Only the customer can decline this quote.");
+      if (!["QUOTED", "AWAITING_CUSTOMER_APPROVAL"].includes(booking.status)) return error(res, 409, "This quote can no longer be declined.");
+      const quote = db.quotes.find((item) => item.bookingId === booking.id && item.status === "PENDING");
+      if (!quote) return error(res, 404, "Quote not found.");
+      quote.status = "DECLINED";
+      quote.declinedAt = now();
+      quote.declineReason = sanitize(body.reason);
+      booking.status = "CANCELLED";
+      booking.cancellationReason = quote.declineReason || "Customer declined the quote";
+      booking.cancelledBy = user.id;
+      booking.updatedAt = now();
+      addAudit(db, user.id, "QUOTE_DECLINED", "Booking", booking.id, { quoteId: quote.id, reason: quote.declineReason });
+      notify(db, booking.technicianId, "QUOTE_DECLINED", "Customer declined quote", quote.declineReason || "The customer declined your quote.", { senderUserId: user.id, bookingId: booking.id });
+      saveDb(db);
+      return send(res, 200, { booking, quote });
+    }
+
+    if (req.method === "POST" && action === "cancel") {
+      if (user.id !== booking.customerId) return error(res, 403, "Only the customer can cancel this service.");
+      if (!["REQUESTED", "QUOTED", "AWAITING_CUSTOMER_APPROVAL", "BOOKED"].includes(booking.status)) return error(res, 409, "This service can no longer be cancelled here.");
+      const quote = db.quotes.find((item) => item.bookingId === booking.id && item.status === "PENDING");
+      if (quote) {
+        quote.status = "DECLINED";
+        quote.declinedAt = now();
+        quote.declineReason = sanitize(body.reason) || "Customer cancelled the service";
+      }
+      db.payments.filter((payment) => payment.bookingId === booking.id && payment.status === "AUTHORIZED").forEach((payment) => {
+        payment.status = "CANCELLED";
+        payment.cancelledAt = now();
+        payment.cancellationReason = sanitize(body.reason) || "Customer cancelled the service";
+      });
+      booking.status = "CANCELLED";
+      booking.cancellationReason = sanitize(body.reason) || "Customer cancelled the service";
+      booking.cancelledBy = user.id;
+      booking.updatedAt = now();
+      addAudit(db, user.id, "SERVICE_CANCELLED_BY_CUSTOMER", "Booking", booking.id, { reason: booking.cancellationReason });
+      notify(db, booking.technicianId, "SERVICE_CANCELLED", "Customer cancelled service", booking.cancellationReason, { senderUserId: user.id, bookingId: booking.id });
+      saveDb(db);
+      return send(res, 200, { booking, quote: quote || null });
+    }
+
+    if (req.method === "POST" && action === "decline") {
+      if (user.id !== booking.technicianId) return error(res, 403, "Only the assigned technician can decline this service.");
+      if (booking.status !== "REQUESTED") return error(res, 409, "This service can no longer be declined.");
+      booking.status = "CANCELLED";
+      booking.cancellationReason = sanitize(body.reason) || "Technician declined the service";
+      booking.cancelledBy = user.id;
+      booking.updatedAt = now();
+      addAudit(db, user.id, "SERVICE_DECLINED_BY_TECHNICIAN", "Booking", booking.id, { reason: booking.cancellationReason });
+      notify(db, booking.customerId, "SERVICE_DECLINED", "Technician declined service", booking.cancellationReason, { senderUserId: user.id, bookingId: booking.id });
+      saveDb(db);
+      return send(res, 200, { booking });
+    }
+
     if (req.method === "POST" && action === "status") {
       const nextStatus = body.status;
       if (!jobStatuses.includes(nextStatus)) return error(res, 400, "Unknown job status.");
@@ -1617,4 +1672,3 @@ if (require.main === module) {
 }
 
 module.exports = { createApp, hashPassword, verifyPassword, blankDb, seed, allowedTransitions };
-

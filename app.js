@@ -258,6 +258,14 @@ function refreshTechnicianProfilePage() {
 
 function renderCustomerBooking(b) {
   const quoteActions = b.quote && b.quote.status === "PENDING" ? `<button data-approve-quote="${b.id}">Approve ${money(b.quote.amountCents)}</button>` : "";
+  const denyServiceForm = ["REQUESTED", "BOOKED"].includes(b.status) ? `<form class="mini-form" data-cancel-booking-form="${b.id}">
+    <label>Reason <input name="reason" placeholder="Reason for denying/cancelling service" /></label>
+    <button type="submit" class="ghost">Deny/Cancel Service</button>
+  </form>` : "";
+  const declineQuoteForm = b.quote && b.quote.status === "PENDING" && ["QUOTED", "AWAITING_CUSTOMER_APPROVAL"].includes(b.status) ? `<form class="mini-form" data-decline-quote-form="${b.id}">
+    <label>Reason <input name="reason" placeholder="Reason for declining quote" /></label>
+    <button type="submit" class="ghost">Decline Quote</button>
+  </form>` : "";
   const reviewPanel = renderCustomerReviewPanel(b);
   const editForm = renderBookingEditForm(b);
   const additions = (b.additionalWorkRequests || []).map((item) => `<div class="item">
@@ -284,6 +292,8 @@ function renderCustomerBooking(b) {
     ${b.invoice ? `<p><strong>Invoice:</strong> ${money(b.invoice.totalCents)} | Platform fee ${money(b.invoice.platformFeeCents)} | Technician ${money(b.invoice.technicianEarningsCents)}</p>` : ""}
     ${findings}
     ${additions}
+    ${declineQuoteForm}
+    ${denyServiceForm}
     ${chat}
     ${reviewPanel}
     <div class="actions">${quoteActions}</div>
@@ -408,6 +418,10 @@ function renderTechJob(b) {
     <label>Appointment <select name="scheduledAt">${slots}</select></label>
     <button type="submit">Accept Time</button>
   </form>` : "";
+  const decline = b.status === "REQUESTED" ? `<form class="mini-form" data-decline-service-form="${b.id}">
+    <label>Reason <input name="reason" placeholder="Reason for denying service" /></label>
+    <button type="submit" class="ghost">Deny Service</button>
+  </form>` : "";
   const estimatedHours = Math.max((b.service.estimatedMinutes || 60) / 60, 0.5);
   const defaultHours = Math.ceil(estimatedHours * 2) / 2;
   const minimumQuoteDollars = Math.max(100, defaultHours * 100);
@@ -444,7 +458,7 @@ function renderTechJob(b) {
     <div class="item-head"><div><strong>${b.service.name}</strong><p class="meta">${b.vehicle.year} ${b.vehicle.make} ${b.vehicle.model} - ${b.dtcs || "No DTCs"}</p></div><span class="status">${b.status}</span></div>
     <p>${b.symptoms}</p>
     ${customerContact}
-    ${accept}${quote}${findings}${existingFindings}
+    ${accept}${decline}${quote}${findings}${existingFindings}
     ${chat}
     <div class="actions">${start}${add}${done}</div>
   </article>`;
@@ -755,12 +769,33 @@ document.body.addEventListener("submit", async (e) => {
       await refreshTechnician();
       toast("Appointment accepted and scheduled.");
     }
+    if (form.dataset.declineServiceForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/bookings/${form.dataset.declineServiceForm}/decline`, { method: "POST", body });
+      await refreshTechnician();
+      toast("Service denied and customer notified.");
+    }
     if (form.dataset.quoteForm) {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(form).entries());
       await api(`/api/bookings/${form.dataset.quoteForm}/quote`, { method: "POST", body: { amountCents: Math.round(Number(body.amount) * 100), pricingModel: "FLAT_RATE", laborHours: Number(body.laborHours) } });
       await refreshTechnician();
       toast("Flat-rate quote sent to customer.");
+    }
+    if (form.dataset.cancelBookingForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/bookings/${form.dataset.cancelBookingForm}/cancel`, { method: "POST", body });
+      await refreshCustomer();
+      toast("Service cancelled and technician notified.");
+    }
+    if (form.dataset.declineQuoteForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/bookings/${form.dataset.declineQuoteForm}/decline-quote`, { method: "POST", body });
+      await refreshCustomer();
+      toast("Quote declined and technician notified.");
     }
     if (form.dataset.findingForm) {
       e.preventDefault();
