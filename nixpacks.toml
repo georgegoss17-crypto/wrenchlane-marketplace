@@ -5,4 +5,5 @@ node = "22"
 cmds = []
 
 [start]
-cmd = "node src/server.js"
+cmd = "node server.js"
+
