@@ -1,4 +1,4 @@
-const state = { user: null, profile: null, vehicles: [], services: [], technicians: [], bookings: [], admin: null };
+const state = { user: null, profile: null, vehicles: [], categories: [], services: [], technicians: [], bookings: [], admin: null, selectedTechnicianId: null };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
@@ -101,6 +101,7 @@ function switchView(name) {
   $$(".view").forEach((el) => el.classList.add("hidden"));
   $(`#${name}View`).classList.remove("hidden");
   if (name === "customer") refreshCustomer();
+  if (name === "technicianProfile") refreshTechnicianProfilePage();
   if (name === "technician") refreshTechnician();
   if (name === "admin") refreshAdmin();
 }
@@ -110,11 +111,24 @@ async function refreshBase() {
   state.user = me.user;
   state.profile = me.profile;
   const svc = await api("/api/services");
+  state.categories = svc.categories || [];
   state.services = svc.services;
   state.technicians = (await api("/api/technicians")).technicians;
-  $("#serviceSelect").innerHTML = state.services.map((s) => `<option value="${s.id}">${s.name} - ${money(s.basePriceCents)}</option>`).join("");
+  $("#serviceSelect").innerHTML = serviceOptionsHtml();
   $("#technicianSelect").innerHTML = state.technicians.map((t) => `<option value="${t.userId}">${t.fullName} - ${t.ratingAverage} stars - ${t.specialties.join(", ")}</option>`).join("");
   showShell();
+}
+
+function serviceOptionsHtml() {
+  const byCategory = new Map(state.categories.map((category) => [category.id, { ...category, services: [] }]));
+  for (const service of state.services) {
+    if (!byCategory.has(service.categoryId)) byCategory.set(service.categoryId, { id: service.categoryId, name: "Other Services", services: [] });
+    byCategory.get(service.categoryId).services.push(service);
+  }
+  return Array.from(byCategory.values()).map((category) => {
+    const options = category.services.map((service) => `<option value="${service.id}">${escapeHtml(service.name)}</option>`).join("");
+    return options ? `<optgroup label="${escapeHtml(category.name)}">${options}</optgroup>` : "";
+  }).join("");
 }
 
 async function refreshCustomer() {
@@ -135,32 +149,71 @@ async function refreshCustomer() {
 }
 
 function renderTechnicianCard(t) {
-  const comments = [...(t.reviews || []).map((review) => review.body), ...(t.comments || []).map((comment) => comment.body)].filter(Boolean);
-  return `<article class="tech-card" data-tech-card="${t.userId}">
+  const reviewCount = (t.reviews || []).length;
+  return `<article class="tech-card" data-tech-card="${t.userId}" data-open-tech="${t.userId}" tabindex="0">
     <div class="profile-card">
       ${t.profilePhotoUrl ? `<img class="avatar" src="${t.profilePhotoUrl}" alt="${escapeHtml(t.fullName)}" />` : `<div class="avatar">WL</div>`}
       <div>
-        <strong>${escapeHtml(t.fullName)}</strong>
+        <button class="link-button" type="button" data-open-tech="${t.userId}"><strong>${escapeHtml(t.fullName)}</strong></button>
         <p class="meta">${t.ratingAverage || "New"} stars - ${t.yearsExperience || 0} years</p>
-        <p class="meta">Flat rate from ${money(t.defaultFlatRateCents)} minimum</p>
+        <p class="meta">${reviewCount} reviews</p>
       </div>
     </div>
     <p>${escapeHtml(t.bio || "This technician has not added a bio yet.")}</p>
     <p class="fineprint">${escapeHtml((t.specialties || []).join(", "))}</p>
-    <div class="comment-list">${comments.slice(-4).map((comment) => `<div class="comment">${escapeHtml(comment)}</div>`).join("") || "<p class='fineprint'>No profile comments yet.</p>"}</div>
-    <form class="comment-form" data-comment-form="${t.userId}">
-      <input name="body" placeholder="Leave a profile comment" />
-      <button type="submit">Post</button>
-    </form>
     <button type="button" data-select-tech="${t.userId}">Select This Technician</button>
   </article>`;
+}
+
+function openTechnicianProfile(technicianId) {
+  state.selectedTechnicianId = technicianId;
+  switchView("technicianProfile");
+}
+
+function refreshTechnicianProfilePage() {
+  const t = state.technicians.find((item) => item.userId === state.selectedTechnicianId);
+  if (!t) {
+    $("#selectedTechnicianProfile").innerHTML = "<p class='fineprint'>Technician profile could not be found.</p>";
+    return;
+  }
+  $("#profilePageTitle").textContent = t.fullName;
+  const reviews = (t.reviews || []).map((review) => `<div class="comment"><strong>${review.rating} stars</strong><p>${escapeHtml(review.body || "No review comment.")}</p></div>`).join("");
+  const comments = (t.comments || []).map((comment) => `<div class="comment">${escapeHtml(comment.body)}</div>`).join("");
+  $("#selectedTechnicianProfile").innerHTML = `<div class="tech-profile-page">
+    <div class="profile-card large-profile">
+      ${t.profilePhotoUrl ? `<img class="profile-photo" src="${t.profilePhotoUrl}" alt="${escapeHtml(t.fullName)}" />` : `<div class="profile-photo">WL</div>`}
+      <div>
+        <h2>${escapeHtml(t.fullName)}</h2>
+        <p class="meta">${t.ratingAverage || "New"} stars - ${t.yearsExperience || 0} years in the field</p>
+        <p class="meta">Flat rate from ${money(t.defaultFlatRateCents)} minimum</p>
+        <p>${escapeHtml(t.bio || "This technician has not added a bio yet.")}</p>
+        <p class="fineprint">${escapeHtml((t.specialties || []).join(", "))}</p>
+        <p class="fineprint">${escapeHtml((t.certifications || []).join(", "))}</p>
+        <button type="button" data-select-tech="${t.userId}">Select This Technician</button>
+      </div>
+    </div>
+    <div class="grid two">
+      <section>
+        <h3>Reviews</h3>
+        <div class="comment-list">${reviews || "<p class='fineprint'>No reviews yet.</p>"}</div>
+      </section>
+      <section>
+        <h3>Profile Comments</h3>
+        <div class="comment-list">${comments || "<p class='fineprint'>No profile comments yet.</p>"}</div>
+        <form class="comment-form" data-comment-form="${t.userId}">
+          <input name="body" placeholder="Leave a profile comment" />
+          <button type="submit">Post</button>
+        </form>
+      </section>
+    </div>
+  </div>`;
 }
 
 function renderCustomerBooking(b) {
   const quoteActions = b.quote && b.quote.status === "PENDING" ? `<button data-approve-quote="${b.id}">Approve ${money(b.quote.amountCents)}</button>` : "";
   const reviewAction = b.status === "COMPLETED" && !b.review ? `<button data-review="${b.id}">Leave Review</button>` : "";
   const additions = (b.additionalWorkRequests || []).map((item) => `<div class="item">
-    <strong>Suggested additional repair: ${escapeHtml(item.description)}</strong>
+    <p><strong>Suggested repair:</strong> ${escapeHtml(item.description)}</p>
     <p class="meta">${money(item.amountCents)} - ${item.status}</p>
     ${item.status === "PENDING" ? `<div class="actions"><button data-add-approve="${item.id}">Approve</button><button class="ghost" data-add-decline="${item.id}">Decline</button></div>` : ""}
   </div>`).join("");
@@ -190,12 +243,14 @@ async function refreshTechnician() {
   state.bookings = (await api("/api/bookings")).bookings;
   await refreshBaseProfileOnly();
   fillTechProfileForm();
+  const techReviews = await api("/api/technician/reviews");
   const opportunities = state.bookings.filter((b) => b.status === "REQUESTED");
   $("#opportunityCount").textContent = opportunities.length;
   const current = state.bookings.find((b) => ["BOOKED", "ARRIVED", "IN_PROGRESS"].includes(b.status));
   $("#currentJob").textContent = current ? current.service.name : "None";
   $("#earnings").textContent = money(state.bookings.reduce((sum, b) => sum + (b.invoice?.technicianEarningsCents || 0), 0));
   $("#techJobs").innerHTML = state.bookings.map(renderTechJob).join("") || "<p class='fineprint'>No jobs assigned yet. Customer demo can create one.</p>";
+  $("#techReviews").innerHTML = techReviews.reviews.map(renderTechReview).join("") || "<p class='fineprint'>No customer reviews yet.</p>";
 }
 
 async function refreshBaseProfileOnly() {
@@ -228,14 +283,21 @@ function renderTechJob(b) {
     <label>Appointment <select name="scheduledAt">${slots}</select></label>
     <button type="submit">Accept Time</button>
   </form>` : "";
+  const estimatedHours = Math.max((b.service.estimatedMinutes || 60) / 60, 0.5);
+  const defaultHours = Math.ceil(estimatedHours * 2) / 2;
+  const minimumQuoteDollars = Math.max(100, defaultHours * 100);
   const quote = ["REQUESTED", "BOOKED"].includes(b.status) && !b.quote ? `<form class="mini-form" data-quote-form="${b.id}">
-    <label>Flat rate <input name="amount" type="number" min="${Math.ceil(Math.max(b.service.estimatedMinutes, 60) / 60 * 100)}" value="${dollars(Math.max(state.profile?.defaultFlatRateCents || b.service.basePriceCents, Math.ceil(Math.max(b.service.estimatedMinutes, 60) / 60 * 10000)))}" /></label>
-    <label>Labor minutes <input name="laborMinutes" type="number" min="15" value="${b.service.estimatedMinutes}" /></label>
+    <label>Flat rate <input name="amount" type="number" min="${minimumQuoteDollars}" step="1" value="${dollars(Math.max(state.profile?.defaultFlatRateCents || b.service.basePriceCents, minimumQuoteDollars * 100))}" /></label>
+    <label>Labor hours <input name="laborHours" type="number" min="0.5" step="0.5" value="${defaultHours.toFixed(1)}" /></label>
     <button type="submit">Send Quote</button>
-    <p class="fineprint">Minimum flat rate is $100 per hour equivalent.</p>
+    <p class="fineprint">Flat rate must be $100 or more. Labor hours must use .5 increments.</p>
   </form>` : "";
   const start = b.status === "BOOKED" ? `<button data-status="${b.id}:IN_PROGRESS">Start Job</button>` : "";
-  const add = b.status === "IN_PROGRESS" ? `<button data-additional="${b.id}">Additional Work</button>` : "";
+  const add = b.status === "IN_PROGRESS" ? `<form class="mini-form" data-additional-work-form="${b.id}">
+    <label>Suggested repair <textarea name="description" placeholder="Example: Suggest replacing the caliper, front brake pads and rotors"></textarea></label>
+    <label>Price to customer <input name="amount" type="number" min="1" step="1" placeholder="185" /></label>
+    <button type="submit">Send Additional Repair</button>
+  </form>` : "";
   const done = ["IN_PROGRESS", "ADDITIONAL_WORK_APPROVED", "ADDITIONAL_WORK_DECLINED"].includes(b.status) ? `<button data-status="${b.id}:COMPLETED">Complete</button>` : "";
   const findings = ["IN_PROGRESS", "ADDITIONAL_WORK_REQUESTED", "ADDITIONAL_WORK_APPROVED", "ADDITIONAL_WORK_DECLINED"].includes(b.status) ? `<form class="mini-form" data-finding-form="${b.id}">
     <label>Finding title <input name="title" value="Inspection finding" /></label>
@@ -254,6 +316,18 @@ function renderTechJob(b) {
   </article>`;
 }
 
+function renderTechReview(review) {
+  const disputeText = review.dispute ? `<p class="fineprint">Sent to owner/admin for review.</p>` : `<form class="mini-form" data-review-dispute-form="${review.id}">
+    <label>Why should the owner/admin review this? <textarea name="reason" placeholder="Explain what is inaccurate or unfair about this review."></textarea></label>
+    <button type="submit">Send To Owner/Admin</button>
+  </form>`;
+  return `<article class="item">
+    <div class="item-head"><div><strong>${review.rating} stars</strong><p class="meta">${new Date(review.createdAt).toLocaleString()}</p></div><span class="status">${review.status || "ACTIVE"}</span></div>
+    <p>${escapeHtml(review.body || "No review comment.")}</p>
+    ${disputeText}
+  </article>`;
+}
+
 async function refreshAdmin() {
   if (!state.user || state.user.role !== "ADMIN") return;
   state.admin = await api("/api/admin/summary");
@@ -269,6 +343,22 @@ async function refreshAdmin() {
   ];
   $("#adminMetrics").innerHTML = labels.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("");
   document.querySelector("[name=platformCommissionPercent]").value = state.admin.commissionPercent;
+  $("#adminReviewDisputes").innerHTML = (state.admin.reviewDisputes || []).map(renderAdminReviewDispute).join("") || "<p class='fineprint'>No review disputes need a decision.</p>";
+}
+
+function renderAdminReviewDispute(dispute) {
+  return `<article class="item">
+    <div class="item-head"><div><strong>${escapeHtml(dispute.technicianProfile?.fullName || "Technician")}</strong><p class="meta">Customer: ${escapeHtml(dispute.customer?.email || "Unknown")}</p></div><span class="status">${dispute.status}</span></div>
+    <p><strong>Review:</strong> ${dispute.review?.rating || "?"} stars - ${escapeHtml(dispute.review?.body || "No review comment.")}</p>
+    <p><strong>Technician complaint:</strong> ${escapeHtml(dispute.reason)}</p>
+    <form class="mini-form" data-admin-review-dispute-form="${dispute.id}">
+      <label>Admin notes <textarea name="adminNotes" placeholder="Notes from contacting customer and technician"></textarea></label>
+      <div class="actions">
+        <button name="decision" value="KEEP" type="submit">Keep Review</button>
+        <button name="decision" value="REMOVE" type="submit" class="ghost">Remove Review</button>
+      </div>
+    </form>
+  </article>`;
 }
 
 async function login(email, password = "DemoPass123!", adminAccessCode = "") {
@@ -411,7 +501,7 @@ document.body.addEventListener("submit", async (e) => {
     if (form.dataset.quoteForm) {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(form).entries());
-      await api(`/api/bookings/${form.dataset.quoteForm}/quote`, { method: "POST", body: { amountCents: Math.round(Number(body.amount) * 100), pricingModel: "FLAT_RATE", laborMinutes: Number(body.laborMinutes) } });
+      await api(`/api/bookings/${form.dataset.quoteForm}/quote`, { method: "POST", body: { amountCents: Math.round(Number(body.amount) * 100), pricingModel: "FLAT_RATE", laborHours: Number(body.laborHours) } });
       await refreshTechnician();
       toast("Flat-rate quote sent to customer.");
     }
@@ -424,13 +514,39 @@ document.body.addEventListener("submit", async (e) => {
       await refreshTechnician();
       toast("Inspection finding uploaded.");
     }
+    if (form.dataset.additionalWorkForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/bookings/${form.dataset.additionalWorkForm}/additional-work`, { method: "POST", body: { description: body.description, amountCents: Math.round(Number(body.amount) * 100) } });
+      form.reset();
+      await refreshTechnician();
+      toast("Additional repair sent to customer.");
+    }
     if (form.dataset.commentForm) {
       e.preventDefault();
       const body = Object.fromEntries(new FormData(form).entries());
       await api(`/api/technicians/${form.dataset.commentForm}/comments`, { method: "POST", body });
       form.reset();
-      await refreshCustomer();
+      state.technicians = (await api("/api/technicians")).technicians;
+      if (state.selectedTechnicianId === form.dataset.commentForm && !$("#technicianProfileView").classList.contains("hidden")) refreshTechnicianProfilePage();
+      else await refreshCustomer();
       toast("Comment added to technician profile.");
+    }
+    if (form.dataset.reviewDisputeForm) {
+      e.preventDefault();
+      const body = Object.fromEntries(new FormData(form).entries());
+      await api(`/api/reviews/${form.dataset.reviewDisputeForm}/dispute`, { method: "POST", body });
+      await refreshTechnician();
+      toast("Review dispute sent to owner/admin.");
+    }
+    if (form.dataset.adminReviewDisputeForm) {
+      e.preventDefault();
+      const submitter = e.submitter;
+      const body = Object.fromEntries(new FormData(form).entries());
+      body.decision = submitter?.value || body.decision;
+      await api(`/api/admin/review-disputes/${form.dataset.adminReviewDisputeForm}/resolve`, { method: "POST", body });
+      await refreshAdmin();
+      toast(body.decision === "REMOVE" ? "Review removed." : "Review kept.");
     }
   } catch (err) {
     toast(err.message);
@@ -438,24 +554,28 @@ document.body.addEventListener("submit", async (e) => {
 });
 
 document.body.addEventListener("click", async (e) => {
-  const target = e.target;
+  const target = e.target.closest("button, [data-open-tech], [data-tech-card]") || e.target;
   try {
     let handled = false;
     if (target.dataset.accept) { await api(`/api/bookings/${target.dataset.accept}/accept`, { method: "POST" }); handled = true; }
-    if (target.dataset.quote) { await api(`/api/bookings/${target.dataset.quote}/quote`, { method: "POST", body: { amountCents: 42500, pricingModel: "FLAT_RATE", laborMinutes: 150 } }); handled = true; }
+    if (target.dataset.quote) { await api(`/api/bookings/${target.dataset.quote}/quote`, { method: "POST", body: { amountCents: 42500, pricingModel: "FLAT_RATE", laborHours: 2.5 } }); handled = true; }
     if (target.dataset.approveQuote) { await api(`/api/bookings/${target.dataset.approveQuote}/approve-quote`, { method: "POST" }); handled = true; }
     if (target.dataset.status) {
       const [id, status] = target.dataset.status.split(":");
       await api(`/api/bookings/${id}/status`, { method: "POST", body: { status } });
       handled = true;
     }
-    if (target.dataset.additional) { await api(`/api/bookings/${target.dataset.additional}/additional-work`, { method: "POST", body: { description: "Seized brake caliper replacement", amountCents: 18500 } }); handled = true; }
     if (target.dataset.addApprove) { await api(`/api/additional-work/${target.dataset.addApprove}/approve`, { method: "POST" }); handled = true; }
     if (target.dataset.addDecline) { await api(`/api/additional-work/${target.dataset.addDecline}/decline`, { method: "POST" }); handled = true; }
     if (target.dataset.review) { await api(`/api/bookings/${target.dataset.review}/review`, { method: "POST", body: { rating: 5, body: "Professional work and clear communication." } }); handled = true; }
+    if (target.dataset.openTech && !e.target.closest("form, input, textarea, select")) {
+      openTechnicianProfile(target.dataset.openTech);
+      toast("Technician profile opened.");
+    }
     if (target.dataset.selectTech) {
       $("#technicianSelect").value = target.dataset.selectTech;
       $$("[data-tech-card]").forEach((card) => card.classList.toggle("selected", card.dataset.techCard === target.dataset.selectTech));
+      switchView("customer");
       $("#bookingForm").scrollIntoView({ behavior: "smooth", block: "start" });
       toast("Technician selected. Describe what you need done.");
     }
@@ -477,6 +597,7 @@ $("#settingsForm").addEventListener("submit", async (e) => {
 
 $("#bookButton").addEventListener("click", () => $("#bookingForm").scrollIntoView({ behavior: "smooth" }));
 $("#findJobs").addEventListener("click", refreshTechnician);
+$("#backToTechnicians").addEventListener("click", () => switchView("customer"));
 
 setPreferredTime();
 setAuthTab("signup");

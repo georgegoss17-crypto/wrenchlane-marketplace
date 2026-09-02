@@ -216,6 +216,19 @@
           </section>
         </section>
 
+        <section id="technicianProfileView" class="view hidden">
+          <div class="dashboard-head">
+            <div>
+              <p class="eyebrow">Technician profile</p>
+              <h1 id="profilePageTitle">Technician</h1>
+            </div>
+            <button class="ghost" id="backToTechnicians">Back</button>
+          </div>
+          <section class="panel">
+            <div id="selectedTechnicianProfile"></div>
+          </section>
+        </section>
+
         <section id="technicianView" class="view hidden">
           <div class="dashboard-head">
             <div>
@@ -262,6 +275,10 @@
             <h2>Job Queue</h2>
             <div id="techJobs" class="list"></div>
           </section>
+          <section class="panel">
+            <h2>Review Disputes</h2>
+            <div id="techReviews" class="list"></div>
+          </section>
         </section>
 
         <section id="adminView" class="view hidden">
@@ -277,6 +294,10 @@
             <label>Commission percent <input name="platformCommissionPercent" type="number" min="0" max="40" step="0.5" value="10" /></label>
             <button type="submit">Save Settings</button>
           </form>
+          <section class="panel">
+            <h2>Review Disputes</h2>
+            <div id="adminReviewDisputes" class="list"></div>
+          </section>
         </section>
       </section>
     </main>

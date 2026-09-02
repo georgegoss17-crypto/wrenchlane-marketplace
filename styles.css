@@ -32,6 +32,14 @@ button:disabled {
   opacity: 0.55;
 }
 button:hover { filter: brightness(0.97); }
+button.link-button {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  padding: 0;
+  text-align: left;
+  font-weight: 900;
+}
 button.ghost, .rail button, .quick-logins button, .auth-tabs button {
   background: #fff;
   border: 1px solid var(--line);
@@ -247,6 +255,12 @@ textarea { min-height: 92px; resize: vertical; }
   padding: 16px;
   display: grid;
   gap: 12px;
+  cursor: pointer;
+}
+.tech-card:hover, .tech-card:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px rgba(245, 179, 53, 0.16);
+  outline: none;
 }
 .tech-card.selected {
   border-color: var(--signal);
@@ -321,6 +335,29 @@ textarea { min-height: 92px; resize: vertical; }
   gap: 14px;
   align-items: center;
 }
+.large-profile {
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: start;
+}
+.tech-profile-page {
+  display: grid;
+  gap: 24px;
+}
+.tech-profile-page h2, .tech-profile-page h3 {
+  margin: 0 0 10px;
+}
+.profile-photo {
+  width: 180px;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--steel);
+  display: grid;
+  place-items: center;
+  color: var(--road);
+  font-size: 2rem;
+  font-weight: 900;
+}
 .avatar {
   width: 76px;
   height: 76px;
@@ -367,6 +404,8 @@ textarea { min-height: 92px; resize: vertical; }
   #userBadge { grid-column: 1 / -1; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .intro { min-height: 390px; padding: 32px; }
+  .large-profile { grid-template-columns: 1fr; }
+  .profile-photo { width: min(100%, 220px); }
 }
 
 @media (max-width: 620px) {

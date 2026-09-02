@@ -24,6 +24,111 @@ const roles = {
   ADMIN: "ADMIN"
 };
 
+const DEFAULT_SERVICE_CATALOG = [
+  {
+    id: "cat_maintenance_preventive",
+    name: "Maintenance & Preventive Service",
+    specialty: "Diagnostics",
+    services: ["Maintenance concern diagnosis", "Fluid leak diagnosis", "Warning/service reminder diagnosis"]
+  },
+  {
+    id: "cat_brake_system",
+    name: "Brake System",
+    specialty: "Brakes",
+    services: ["Brake system diagnosis", "Brake noise diagnosis", "Brake vibration/pulsation diagnosis", "ABS diagnosis", "Parking brake diagnosis"]
+  },
+  {
+    id: "cat_steering_suspension",
+    name: "Steering & Suspension",
+    specialty: "Suspension",
+    services: ["Steering system diagnosis", "Suspension system diagnosis", "Clunk/noise diagnosis", "Vehicle pulling diagnosis", "Steering vibration diagnosis", "Ride-height diagnosis"]
+  },
+  {
+    id: "cat_cooling_system",
+    name: "Cooling System",
+    specialty: "Diagnostics",
+    services: ["Cooling system diagnosis", "Overheating diagnosis", "Coolant leak diagnosis", "Cooling fan diagnosis", "Heater/coolant circulation diagnosis", "No-heat diagnosis"]
+  },
+  {
+    id: "cat_ignition_engine_performance",
+    name: "Ignition & Engine Performance",
+    specialty: "Diagnostics",
+    services: ["Engine performance diagnosis", "Misfire diagnosis", "Rough idle diagnosis", "Stalling diagnosis", "Loss-of-power diagnosis", "Poor acceleration diagnosis", "Spark/ignition system diagnosis", "Sensor performance diagnosis"]
+  },
+  {
+    id: "cat_fuel_system",
+    name: "Fuel System",
+    specialty: "Diagnostics",
+    services: ["Fuel system diagnosis", "Fuel pressure diagnosis", "Fuel injector diagnosis", "Fuel pump diagnosis", "Fuel leak diagnosis", "Rich/lean condition diagnosis", "High-pressure fuel system diagnosis"]
+  },
+  {
+    id: "cat_intake_exhaust",
+    name: "Intake & Exhaust",
+    specialty: "Diagnostics",
+    services: ["Intake system diagnosis", "Vacuum leak diagnosis", "Exhaust leak diagnosis", "Exhaust restriction diagnosis", "EGR system diagnosis", "Catalytic converter efficiency diagnosis", "Boost/charge-air leak diagnosis"]
+  },
+  {
+    id: "cat_electrical_system",
+    name: "Electrical System",
+    specialty: "Diagnostics",
+    services: ["Electrical system diagnosis", "Battery diagnosis", "Starting system diagnosis", "Charging system diagnosis", "Parasitic draw diagnosis", "Wiring/circuit diagnosis", "Ground circuit diagnosis", "Fuse/relay diagnosis", "CAN/network communication diagnosis", "Intermittent electrical diagnosis"]
+  },
+  {
+    id: "cat_hvac_ac_heating",
+    name: "HVAC / A/C & Heating",
+    specialty: "Diagnostics",
+    services: ["HVAC system diagnosis", "A/C performance diagnosis", "No A/C diagnosis", "No heat diagnosis", "Blower motor diagnosis", "HVAC actuator diagnosis", "Compressor diagnosis", "Refrigerant pressure diagnosis"]
+  },
+  {
+    id: "cat_wheels_tires",
+    name: "Wheels & Tires",
+    specialty: "Diagnostics",
+    services: ["Tire/wheel diagnosis", "Tire vibration diagnosis", "Tire pressure loss diagnosis", "TPMS diagnosis", "Uneven tire wear diagnosis", "Wheel bearing noise diagnosis"]
+  },
+  {
+    id: "cat_drivetrain_axles_4wd",
+    name: "Drivetrain / Axles / 4WD",
+    specialty: "Diagnostics",
+    services: ["Drivetrain diagnosis", "CV axle diagnosis", "Driveshaft diagnosis", "Differential diagnosis", "4WD/AWD system diagnosis", "Transfer case diagnosis", "Driveline vibration diagnosis", "Clunk/noise diagnosis"]
+  },
+  {
+    id: "cat_transmission",
+    name: "Transmission",
+    specialty: "Diagnostics",
+    services: ["Transmission performance diagnosis", "Transmission electrical diagnosis", "Shift concern diagnosis", "Transmission slipping diagnosis", "Delayed engagement diagnosis", "Harsh shift diagnosis", "Transmission fluid leak diagnosis", "Transmission overheating diagnosis", "Shifter/range sensor diagnosis"]
+  },
+  {
+    id: "cat_engine_bolt_on_components",
+    name: "Engine / Bolt-On Components",
+    specialty: "Diagnostics",
+    services: ["Engine mechanical diagnosis", "Engine oil leak diagnosis", "Engine noise diagnosis", "Low oil pressure diagnosis", "VVT system diagnosis", "Engine mount diagnosis", "Belt/pulley diagnosis", "Intake manifold diagnosis"]
+  },
+  {
+    id: "cat_doors_windows_accessories",
+    name: "Doors, Windows & Accessories",
+    specialty: "Diagnostics",
+    services: ["Power window diagnosis", "Power lock diagnosis", "Door electrical diagnosis", "Mirror diagnosis", "Power seat diagnosis", "Wiper system diagnosis", "Washer system diagnosis", "Liftgate diagnosis"]
+  },
+  {
+    id: "cat_diesel",
+    name: "Diesel",
+    specialty: "Diesel",
+    services: ["Diesel engine performance diagnosis", "Diesel no-start diagnosis", "Diesel fuel system diagnosis", "Injector diagnosis", "High-pressure oil/fuel diagnosis", "Turbo/boost diagnosis", "EGR diagnosis", "DPF/aftertreatment diagnosis", "DEF/SCR diagnosis", "Glow plug system diagnosis", "Diesel electrical diagnosis"]
+  },
+  {
+    id: "cat_hybrid_ev",
+    name: "Hybrid / EV - Qualified Techs Only",
+    specialty: "Hybrid/EV",
+    services: ["Hybrid system diagnosis", "EV system diagnosis", "High-voltage system diagnosis", "Charging system diagnosis", "Battery performance diagnosis", "Electric motor/inverter diagnosis", "Thermal-management diagnosis"]
+  },
+  {
+    id: "cat_safety_warning_systems",
+    name: "Safety / Warning Systems",
+    specialty: "Diagnostics",
+    services: ["ABS warning light diagnosis", "SRS/Airbag warning light diagnosis", "Traction-control diagnosis", "TPMS warning diagnosis", "Battery warning diagnosis", "Temperature warning diagnosis", "Other warning-light diagnosis"]
+  }
+];
+
 const jobStatuses = [
   "REQUESTED",
   "QUOTED",
@@ -76,6 +181,66 @@ function money(centsValue) {
 
 function minimumFlatRateCents(laborMinutes) {
   return Math.ceil((Math.max(Number(laborMinutes || 60), 60) / 60) * MIN_FLAT_RATE_CENTS_PER_HOUR);
+}
+
+function normalizeLaborHours(body, fallbackMinutes) {
+  if (body.laborHours !== undefined) return Number(body.laborHours);
+  return Number(body.laborMinutes || fallbackMinutes || 60) / 60;
+}
+
+function slug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/a\/c/g, "ac")
+    .replace(/4wd\/awd/g, "4wd_awd")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function defaultServiceId(categoryId, serviceName) {
+  return `svc_${categoryId.replace(/^cat_/, "")}_${slug(serviceName)}`;
+}
+
+function applyDefaultServiceCatalog(db) {
+  const activeCategoryIds = new Set(DEFAULT_SERVICE_CATALOG.map((category) => category.id));
+  const activeServiceIds = new Set();
+  DEFAULT_SERVICE_CATALOG.forEach((category, categoryIndex) => {
+    let existingCategory = db.serviceCategories.find((item) => item.id === category.id);
+    if (!existingCategory) {
+      existingCategory = { id: category.id };
+      db.serviceCategories.push(existingCategory);
+    }
+    existingCategory.name = category.name;
+    existingCategory.active = true;
+    existingCategory.sortOrder = categoryIndex;
+
+    category.services.forEach((serviceName, serviceIndex) => {
+      const serviceId = defaultServiceId(category.id, serviceName);
+      activeServiceIds.add(serviceId);
+      let service = db.services.find((item) => item.id === serviceId);
+      if (!service) {
+        service = { id: serviceId };
+        db.services.push(service);
+      }
+      service.categoryId = category.id;
+      service.name = serviceName;
+      service.description = `${serviceName}.`;
+      service.pricingModel = "FLAT_RATE";
+      service.basePriceCents = minimumFlatRateCents(60);
+      service.estimatedMinutes = 60;
+      service.requiredSpecialty = category.specialty;
+      service.active = true;
+      service.sortOrder = serviceIndex;
+    });
+  });
+
+  for (const category of db.serviceCategories) {
+    if (!activeCategoryIds.has(category.id)) category.active = false;
+  }
+  for (const service of db.services) {
+    if (!activeServiceIds.has(service.id)) service.active = false;
+  }
 }
 
 function blankDb() {
@@ -172,8 +337,6 @@ function seed(db) {
   const customer = { id: id("usr"), email: "customer@demo.com", passwordHash: hashPassword("DemoPass123!"), role: roles.CUSTOMER, status: "ACTIVE", createdAt, updatedAt: createdAt };
   const tech = { id: id("usr"), email: "tech@demo.com", passwordHash: hashPassword("DemoPass123!"), role: roles.TECHNICIAN, status: "ACTIVE", createdAt, updatedAt: createdAt };
   const admin = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_ADMIN_PASSWORD), role: roles.ADMIN, status: "ACTIVE", createdAt, updatedAt: createdAt };
-  const brakes = { id: id("cat"), name: "Brakes" };
-  const electrical = { id: id("cat"), name: "Diagnostics" };
   db.users.push(customer, tech, admin);
   db.customerProfiles.push({ id: id("cus"), userId: customer.id, fullName: "Jordan Driver", phone: "555-0100", createdAt, updatedAt: createdAt });
   db.technicianProfiles.push({
@@ -203,11 +366,7 @@ function seed(db) {
     updatedAt: createdAt
   });
   db.technicianCertifications.push({ id: id("cert"), technicianProfileId: db.technicianProfiles[0].id, name: "ASE Brakes", documentUrl: "", status: "APPROVED", createdAt });
-  db.serviceCategories.push(brakes, electrical);
-  db.services.push(
-    { id: id("svc"), categoryId: brakes.id, name: "Brake pads and rotors", description: "Replace pads and rotors on one axle.", pricingModel: "FLAT_RATE", basePriceCents: 42500, estimatedMinutes: 150, requiredSpecialty: "Brakes" },
-    { id: id("svc"), categoryId: electrical.id, name: "Check engine diagnostic", description: "Read DTCs and perform initial diagnostic workflow.", pricingModel: "HOURLY", basePriceCents: 14500, estimatedMinutes: 60, requiredSpecialty: "Diagnostics" }
-  );
+  applyDefaultServiceCatalog(db);
   db.platformSettings.push({ key: "platformCommissionPercent", value: "10", updatedAt: createdAt });
   db.platformSettings.push({ key: "adminAccessCodeConfigured", value: "true", updatedAt: createdAt });
   db.adminUsers.push({ id: id("adm"), userId: admin.id, createdAt });
@@ -226,6 +385,7 @@ function normalizeDb(db) {
     profile.defaultFlatRateCents = Math.max(profile.defaultFlatRateCents, MIN_FLAT_RATE_CENTS_PER_HOUR);
     if (!profile.applicationAnswers) profile.applicationAnswers = {};
   }
+  applyDefaultServiceCatalog(db);
   syncOwnerAdmin(db);
   return db;
 }
@@ -336,6 +496,18 @@ function notify(db, userId, type, title, body) {
   db.notifications.push({ id: id("not"), userId, type, title, body, readAt: null, createdAt: now() });
 }
 
+function visibleReviews(db, technicianId) {
+  return db.reviews.filter((review) => review.technicianId === technicianId && review.status !== "REMOVED");
+}
+
+function updateTechnicianRating(db, technicianId) {
+  const reviews = visibleReviews(db, technicianId);
+  const profile = db.technicianProfiles.find((item) => item.userId === technicianId);
+  if (!profile) return;
+  profile.ratingAverage = reviews.length ? Math.round((reviews.reduce((sum, item) => sum + item.rating, 0) / reviews.length) * 10) / 10 : "New";
+  profile.updatedAt = now();
+}
+
 function canTransition(from, to) {
   return allowedTransitions[from]?.includes(to);
 }
@@ -347,7 +519,8 @@ function ownedBooking(user, booking) {
 function technicianMatches(db, technicianUserId, service, location) {
   const profile = db.technicianProfiles.find((item) => item.userId === technicianUserId);
   if (!profile || profile.verificationStatus !== "APPROVED") return false;
-  if (service.requiredSpecialty && !profile.specialties.includes(service.requiredSpecialty)) return false;
+  const specialties = profile.specialties || [];
+  if (service.requiredSpecialty && !specialties.includes(service.requiredSpecialty) && !specialties.includes("Diagnostics")) return false;
   return Boolean(location) && profile.serviceRadiusMiles > 0;
 }
 
@@ -522,14 +695,19 @@ async function api(req, res, db) {
     return send(res, 200, { user: publicUser(user), profile });
   }
 
-  if (req.method === "GET" && url.pathname === "/api/services") return send(res, 200, { categories: db.serviceCategories, services: db.services });
+  if (req.method === "GET" && url.pathname === "/api/services") {
+    const services = db.services.filter((service) => service.active !== false).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    const activeCategoryIds = new Set(services.map((service) => service.categoryId));
+    const categories = db.serviceCategories.filter((category) => category.active !== false && activeCategoryIds.has(category.id)).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    return send(res, 200, { categories, services });
+  }
 
   if (req.method === "GET" && url.pathname === "/api/technicians") {
     return send(res, 200, {
       technicians: db.technicianProfiles.filter((profile) => profile.verificationStatus === "APPROVED").map((profile) => ({
         ...profile,
         user: publicUser(db.users.find((user) => user.id === profile.userId)),
-        reviews: db.reviews.filter((review) => review.technicianId === profile.userId),
+        reviews: visibleReviews(db, profile.userId),
         comments: db.technicianProfileComments.filter((comment) => comment.technicianId === profile.userId)
       }))
     });
@@ -596,7 +774,7 @@ async function api(req, res, db) {
     const user = requireUser(req, res, db, [roles.CUSTOMER]);
     if (!user) return;
     const vehicle = db.vehicles.find((item) => item.id === body.vehicleId && item.customerId === user.id);
-    const service = db.services.find((item) => item.id === body.serviceId);
+    const service = db.services.find((item) => item.id === body.serviceId && item.active !== false);
     const technician = db.users.find((item) => item.id === body.technicianId && item.role === roles.TECHNICIAN);
     if (!vehicle || !service || !technician) return error(res, 400, "Choose a valid vehicle, service, and technician.");
     const location = { id: id("loc"), userId: user.id, address: sanitize(body.address), city: sanitize(body.city), region: sanitize(body.region), postalCode: sanitize(body.postalCode), latitude: Number(body.latitude || 0), longitude: Number(body.longitude || 0), privacyLabel: "APPROXIMATE_UNTIL_BOOKED", createdAt: now() };
@@ -659,13 +837,18 @@ async function api(req, res, db) {
       if (user.id !== booking.technicianId) return error(res, 403, "Only the technician can quote this booking.");
       const service = db.services.find((item) => item.id === booking.serviceId);
       const profile = db.technicianProfiles.find((item) => item.userId === user.id);
-      const laborMinutes = Number(body.laborMinutes || service.estimatedMinutes);
+      const laborHours = normalizeLaborHours(body, service.estimatedMinutes);
+      if (laborHours < 0.5 || !Number.isFinite(laborHours) || Math.round(laborHours * 2) !== laborHours * 2) {
+        return error(res, 400, "Labor hours must be 0.5 or higher and entered in half-hour increments.");
+      }
+      const laborMinutes = Math.round(laborHours * 60);
       const amountCents = Number(body.amountCents || profile?.defaultFlatRateCents || service.basePriceCents);
       const minAmountCents = minimumFlatRateCents(laborMinutes);
+      if (amountCents < MIN_FLAT_RATE_CENTS_PER_HOUR) return error(res, 400, "Flat rate value must be greater than or equal to $100.00.");
       if ((body.pricingModel || service.pricingModel) === "FLAT_RATE" && amountCents < minAmountCents) {
-        return error(res, 400, `Flat-rate quotes must be at least ${money(minAmountCents)} for ${laborMinutes} minutes of work.`);
+        return error(res, 400, `Flat-rate quotes must be at least ${money(minAmountCents)} for ${laborHours.toFixed(1)} hours of work.`);
       }
-      const quote = { id: id("quo"), bookingId: booking.id, technicianId: user.id, pricingModel: body.pricingModel || service.pricingModel, laborMinutes, amountCents, status: "PENDING", customerApprovedAt: null, createdAt: now() };
+      const quote = { id: id("quo"), bookingId: booking.id, technicianId: user.id, pricingModel: body.pricingModel || service.pricingModel, laborHours, laborMinutes, amountCents, status: "PENDING", customerApprovedAt: null, createdAt: now() };
       db.quotes = db.quotes.filter((item) => item.bookingId !== booking.id);
       db.quotes.push(quote);
       booking.status = "AWAITING_CUSTOMER_APPROVAL";
@@ -757,10 +940,9 @@ async function api(req, res, db) {
       if (db.reviews.some((item) => item.bookingId === booking.id)) return error(res, 409, "This job already has a review.");
       const review = { id: id("rev"), bookingId: booking.id, customerId: user.id, technicianId: booking.technicianId, rating: Number(body.rating), body: sanitize(body.body), createdAt: now() };
       if (review.rating < 1 || review.rating > 5) return error(res, 400, "Rating must be 1 through 5.");
+      review.status = "ACTIVE";
       db.reviews.push(review);
-      const reviews = db.reviews.filter((item) => item.technicianId === booking.technicianId);
-      const profile = db.technicianProfiles.find((item) => item.userId === booking.technicianId);
-      profile.ratingAverage = Math.round((reviews.reduce((sum, item) => sum + item.rating, 0) / reviews.length) * 10) / 10;
+      updateTechnicianRating(db, booking.technicianId);
       notify(db, booking.technicianId, "REVIEW_RECEIVED", "New review received", `${review.rating} stars`);
       saveDb(db);
       return send(res, 201, { review });
@@ -785,10 +967,56 @@ async function api(req, res, db) {
     return send(res, 200, { request, booking });
   }
 
+  if (req.method === "GET" && url.pathname === "/api/technician/reviews") {
+    const user = requireUser(req, res, db, [roles.TECHNICIAN]);
+    if (!user) return;
+    const reviews = visibleReviews(db, user.id).map((review) => ({
+      ...review,
+      booking: db.bookings.find((booking) => booking.id === review.bookingId),
+      dispute: db.disputes.find((dispute) => dispute.reviewId === review.id && dispute.status !== "CLOSED")
+    }));
+    return send(res, 200, { reviews });
+  }
+
+  const reviewDispute = url.pathname.match(/^\/api\/reviews\/([^/]+)\/dispute$/);
+  if (reviewDispute && req.method === "POST") {
+    const user = requireUser(req, res, db, [roles.TECHNICIAN]);
+    if (!user) return;
+    const review = visibleReviews(db, user.id).find((item) => item.id === reviewDispute[1]);
+    if (!review) return error(res, 404, "Review not found.");
+    if (db.disputes.some((item) => item.reviewId === review.id && item.status !== "CLOSED")) return error(res, 409, "This review already has an open dispute.");
+    const dispute = {
+      id: id("dsp"),
+      type: "REVIEW_DISPUTE",
+      reviewId: review.id,
+      bookingId: review.bookingId,
+      technicianId: user.id,
+      customerId: review.customerId,
+      reason: sanitize(body.reason),
+      status: "OPEN",
+      decision: null,
+      adminNotes: "",
+      createdAt: now(),
+      updatedAt: now()
+    };
+    if (!dispute.reason) return error(res, 400, "Tell the owner/admin why this review should be checked.");
+    db.disputes.push(dispute);
+    review.status = "DISPUTED";
+    notify(db, user.id, "REVIEW_DISPUTE_CREATED", "Review dispute sent to owner/admin", dispute.reason);
+    saveDb(db);
+    return send(res, 201, { dispute });
+  }
+
   if (req.method === "GET" && url.pathname === "/api/admin/summary") {
     const user = requireUser(req, res, db, [roles.ADMIN]);
     if (!user) return;
     const revenue = db.invoices.reduce((sum, invoice) => sum + invoice.platformFeeCents, 0);
+    const reviewDisputes = db.disputes.filter((item) => item.type === "REVIEW_DISPUTE" && item.status !== "CLOSED").map((dispute) => ({
+      ...dispute,
+      review: db.reviews.find((review) => review.id === dispute.reviewId),
+      technicianProfile: db.technicianProfiles.find((profile) => profile.userId === dispute.technicianId),
+      customer: publicUser(db.users.find((item) => item.id === dispute.customerId))
+    }));
     return send(res, 200, {
       activeJobs: db.bookings.filter((booking) => !["COMPLETED", "CANCELLED", "REFUNDED"].includes(booking.status)).length,
       todaysBookings: db.bookings.length,
@@ -798,8 +1026,33 @@ async function api(req, res, db) {
       todaysRevenueCents: revenue,
       technicianPayoutsCents: db.payouts.reduce((sum, payout) => sum + payout.amountCents, 0),
       openDisputes: db.disputes.filter((item) => item.status !== "CLOSED").length,
-      commissionPercent: Number(setting(db, "platformCommissionPercent", "10"))
+      commissionPercent: Number(setting(db, "platformCommissionPercent", "10")),
+      reviewDisputes
     });
+  }
+
+  const adminReviewDispute = url.pathname.match(/^\/api\/admin\/review-disputes\/([^/]+)\/resolve$/);
+  if (adminReviewDispute && req.method === "POST") {
+    const user = requireUser(req, res, db, [roles.ADMIN]);
+    if (!user) return;
+    const dispute = db.disputes.find((item) => item.id === adminReviewDispute[1] && item.type === "REVIEW_DISPUTE");
+    if (!dispute) return error(res, 404, "Review dispute not found.");
+    if (dispute.status === "CLOSED") return error(res, 409, "This dispute is already closed.");
+    const review = db.reviews.find((item) => item.id === dispute.reviewId);
+    const decision = sanitize(body.decision).toUpperCase();
+    if (!["KEEP", "REMOVE"].includes(decision)) return error(res, 400, "Decision must be KEEP or REMOVE.");
+    if (review) {
+      review.status = decision === "REMOVE" ? "REMOVED" : "ACTIVE";
+      updateTechnicianRating(db, review.technicianId);
+    }
+    dispute.status = "CLOSED";
+    dispute.decision = decision;
+    dispute.adminNotes = sanitize(body.adminNotes);
+    dispute.resolvedBy = user.id;
+    dispute.updatedAt = now();
+    addAudit(db, user.id, `REVIEW_DISPUTE_${decision}`, "Dispute", dispute.id, { reviewId: dispute.reviewId });
+    saveDb(db);
+    return send(res, 200, { dispute, review });
   }
 
   if (req.method === "POST" && url.pathname === "/api/admin/technicians/approve") {
