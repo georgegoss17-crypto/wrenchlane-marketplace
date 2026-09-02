@@ -343,7 +343,30 @@ async function refreshAdmin() {
   ];
   $("#adminMetrics").innerHTML = labels.map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("");
   document.querySelector("[name=platformCommissionPercent]").value = state.admin.commissionPercent;
+  $("#adminTechnicianApplications").innerHTML = (state.admin.pendingTechnicians || []).map(renderAdminTechnicianApplication).join("") || "<p class='fineprint'>No technician applications waiting right now.</p>";
   $("#adminReviewDisputes").innerHTML = (state.admin.reviewDisputes || []).map(renderAdminReviewDispute).join("") || "<p class='fineprint'>No review disputes need a decision.</p>";
+}
+
+function renderAdminTechnicianApplication(profile) {
+  const answers = profile.applicationAnswers || {};
+  return `<article class="item">
+    <div class="item-head">
+      <div>
+        <strong>${escapeHtml(profile.fullName)}</strong>
+        <p class="meta">${escapeHtml(profile.user?.email || "")} - ${profile.verificationStatus}</p>
+      </div>
+      <span class="status">${profile.yearsExperience || 0} years</span>
+    </div>
+    <p><strong>Legal name:</strong> ${escapeHtml(answers.legalName || "")}</p>
+    <p><strong>Business:</strong> ${escapeHtml(answers.businessName || "None listed")}</p>
+    <p><strong>Travel vehicle:</strong> ${answers.hasTravelVehicle ? "Yes" : "No"}</p>
+    <p><strong>Parts preference:</strong> ${escapeHtml(answers.partsPreference || "Not listed")}</p>
+    <p><strong>Honesty agreement:</strong> ${answers.honestRepairs ? "Yes" : "No"} | <strong>Complaint agreement:</strong> ${answers.complaintResolution ? "Yes" : "No"}</p>
+    <div class="actions">
+      <button type="button" data-tech-approval="${profile.userId}:APPROVED">Approve</button>
+      <button type="button" class="ghost" data-tech-approval="${profile.userId}:DENIED">Deny</button>
+    </div>
+  </article>`;
 }
 
 function renderAdminReviewDispute(dispute) {
@@ -361,8 +384,12 @@ function renderAdminReviewDispute(dispute) {
   </article>`;
 }
 
-async function login(email, password = "DemoPass123!", adminAccessCode = "") {
-  await api("/api/auth/login", { method: "POST", body: { email, password, adminAccessCode } });
+function updateOwnerCodeVisibility() {
+  $("#ownerCodeField").classList.toggle("hidden", $("#loginRole").value !== "ADMIN");
+}
+
+async function login(email, password = "DemoPass123!", adminAccessCode = "", role = "") {
+  await api("/api/auth/login", { method: "POST", body: { email, password, adminAccessCode, role } });
   await refreshBase();
   toast("Logged in.");
 }
@@ -383,11 +410,11 @@ async function register(role, form) {
   }
   await api("/api/auth/register", { method: "POST", body });
   if (role === "CUSTOMER") {
-    await login(body.email, body.password);
+    await login(body.email, body.password, "", "CUSTOMER");
     toast("Account created. Add your vehicle to book a technician.");
   } else {
-    setAuthTab("login");
-    toast("Technician application created. Admin approval is required before paid jobs.");
+    await login(body.email, body.password, "", "TECHNICIAN");
+    toast("Technician application created. Admin approval is required before customers can book you.");
   }
 }
 
@@ -406,11 +433,15 @@ $("#technicianSignupForm").addEventListener("submit", async (e) => {
 $("#loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = new FormData(e.currentTarget);
-  try { await login(form.get("email"), form.get("password"), form.get("adminAccessCode") || ""); } catch (err) { toast(err.message); }
+  try { await login(form.get("email"), form.get("password"), form.get("adminAccessCode") || "", form.get("role") || ""); } catch (err) { toast(err.message); }
 });
+
+$("#loginRole").addEventListener("change", updateOwnerCodeVisibility);
 
 $("#ownerLoginBtn").addEventListener("click", () => {
   setAuthTab("login");
+  $("#loginRole").value = "ADMIN";
+  updateOwnerCodeVisibility();
   $("#ownerCodeField").classList.remove("hidden");
   $("#loginForm [name=email]").value = "georgegoss17@gmail.com";
   $("#loginForm [name=password]").value = "";
@@ -455,7 +486,7 @@ $("#backToLoginBtn").addEventListener("click", () => {
   $("#authPanel").classList.remove("hidden");
 });
 
-$$("[data-login]").forEach((btn) => btn.addEventListener("click", () => login(btn.dataset.login)));
+$$("[data-login]").forEach((btn) => btn.addEventListener("click", () => login(btn.dataset.login, "DemoPass123!", "", btn.dataset.loginRole || "")));
 $$("[data-view]").forEach((btn) => btn.addEventListener("click", () => switchView(btn.dataset.view)));
 $("#logoutBtn").addEventListener("click", async () => { await api("/api/auth/logout", { method: "POST" }); state.user = null; showShell(); });
 
@@ -568,6 +599,13 @@ document.body.addEventListener("click", async (e) => {
     if (target.dataset.addApprove) { await api(`/api/additional-work/${target.dataset.addApprove}/approve`, { method: "POST" }); handled = true; }
     if (target.dataset.addDecline) { await api(`/api/additional-work/${target.dataset.addDecline}/decline`, { method: "POST" }); handled = true; }
     if (target.dataset.review) { await api(`/api/bookings/${target.dataset.review}/review`, { method: "POST", body: { rating: 5, body: "Professional work and clear communication." } }); handled = true; }
+    if (target.dataset.techApproval) {
+      const [technicianId, status] = target.dataset.techApproval.split(":");
+      await api("/api/admin/technicians/approve", { method: "POST", body: { technicianId, status } });
+      await refreshAdmin();
+      toast(status === "APPROVED" ? "Technician approved." : "Technician denied.");
+      handled = false;
+    }
     if (target.dataset.openTech && !e.target.closest("form, input, textarea, select")) {
       openTechnicianProfile(target.dataset.openTech);
       toast("Technician profile opened.");

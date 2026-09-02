@@ -13,6 +13,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "local-development-secret-c
 const MIN_FLAT_RATE_CENTS_PER_HOUR = 10000;
 const OWNER_ADMIN_EMAIL = (process.env.OWNER_ADMIN_EMAIL || "georgegoss17@gmail.com").toLowerCase();
 const OWNER_ADMIN_PASSWORD = process.env.OWNER_ADMIN_PASSWORD || "WynterChristopher0125!";
+const OWNER_CUSTOMER_TECH_PASSWORD = process.env.OWNER_CUSTOMER_TECH_PASSWORD || "AvaLynnRiles0125!";
 const ADMIN_ACCESS_CODE = process.env.ADMIN_ACCESS_CODE || "2825966745370125";
 const CUSTOMER_TERMS_VERSION = "customer-repair-authorization-v1";
 const TECHNICIAN_TERMS_VERSION = "technician-service-standards-v1";
@@ -387,6 +388,7 @@ function normalizeDb(db) {
   }
   applyDefaultServiceCatalog(db);
   syncOwnerAdmin(db);
+  syncOwnerCustomerAndTechnician(db);
   return db;
 }
 
@@ -402,6 +404,68 @@ function syncOwnerAdmin(db) {
   admin.status = "ACTIVE";
   admin.updatedAt = timestamp;
   if (!db.adminUsers.some((item) => item.userId === admin.id)) db.adminUsers.push({ id: id("adm"), userId: admin.id, createdAt: timestamp });
+}
+
+function syncOwnerCustomerAndTechnician(db) {
+  const timestamp = now();
+  let customer = db.users.find((user) => user.email === OWNER_ADMIN_EMAIL && user.role === roles.CUSTOMER);
+  if (!customer) {
+    customer = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_CUSTOMER_TECH_PASSWORD), role: roles.CUSTOMER, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
+    db.users.push(customer);
+  }
+  if (!verifyPassword(OWNER_CUSTOMER_TECH_PASSWORD, customer.passwordHash)) customer.passwordHash = hashPassword(OWNER_CUSTOMER_TECH_PASSWORD);
+  customer.status = "ACTIVE";
+  customer.updatedAt = timestamp;
+  if (!db.customerProfiles.some((profile) => profile.userId === customer.id)) {
+    db.customerProfiles.push({ id: id("cus"), userId: customer.id, fullName: "George Goss", phone: "", createdAt: timestamp, updatedAt: timestamp });
+  }
+
+  let tech = db.users.find((user) => user.email === OWNER_ADMIN_EMAIL && user.role === roles.TECHNICIAN);
+  if (!tech) {
+    tech = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_CUSTOMER_TECH_PASSWORD), role: roles.TECHNICIAN, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
+    db.users.push(tech);
+  }
+  if (!verifyPassword(OWNER_CUSTOMER_TECH_PASSWORD, tech.passwordHash)) tech.passwordHash = hashPassword(OWNER_CUSTOMER_TECH_PASSWORD);
+  tech.status = "ACTIVE";
+  tech.updatedAt = timestamp;
+  let profile = db.technicianProfiles.find((item) => item.userId === tech.id);
+  if (!profile) {
+    profile = {
+      id: id("tec"),
+      userId: tech.id,
+      fullName: "George Goss",
+      profilePhotoUrl: "",
+      bio: "Owner technician profile.",
+      yearsExperience: 0,
+      specialties: ["Diagnostics"],
+      certifications: [],
+      applicationAnswers: {
+        yearsInField: 0,
+        legalName: "George Goss",
+        businessName: "",
+        hasTravelVehicle: true,
+        partsPreference: "Either technician or customer supplied parts",
+        honestRepairs: true,
+        complaintResolution: true,
+        electronicSignature: "George Goss",
+        agreementVersion: TECHNICIAN_TERMS_VERSION
+      },
+      serviceRadiusMiles: 35,
+      mobileServiceAvailable: true,
+      shopServiceAvailable: false,
+      hourlyRateCents: MIN_FLAT_RATE_CENTS_PER_HOUR,
+      defaultFlatRateCents: MIN_FLAT_RATE_CENTS_PER_HOUR,
+      verificationStatus: "APPROVED",
+      ratingAverage: "New",
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    db.technicianProfiles.push(profile);
+  }
+  profile.verificationStatus = "APPROVED";
+  profile.defaultFlatRateCents = Math.max(profile.defaultFlatRateCents || 0, MIN_FLAT_RATE_CENTS_PER_HOUR);
+  profile.hourlyRateCents = Math.max(profile.hourlyRateCents || 0, MIN_FLAT_RATE_CENTS_PER_HOUR);
+  profile.updatedAt = timestamp;
 }
 
 function loadDb() {
@@ -582,7 +646,7 @@ async function api(req, res, db) {
       if (body.honestRepairs !== true || body.complaintResolution !== true) return error(res, 400, "Technicians must agree to honest repair recommendations and complaint resolution standards.");
       if (!sanitize(body.legalName) || !sanitize(body.electronicSignature)) return error(res, 400, "Technician legal name and electronic signature are required.");
     }
-    if (db.users.some((user) => user.email === email)) return error(res, 409, "That email is already registered.");
+    if (db.users.some((user) => user.email === email && user.role === role)) return error(res, 409, `That email is already registered as a ${role.toLowerCase()}.`);
     const user = { id: id("usr"), email, passwordHash: hashPassword(password), role, status: "ACTIVE", createdAt: now(), updatedAt: now() };
     db.users.push(user);
     if (role === roles.CUSTOMER) {
@@ -629,7 +693,12 @@ async function api(req, res, db) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/auth/login") {
-    const user = db.users.find((item) => item.email === sanitize(body.email).toLowerCase());
+    const email = sanitize(body.email).toLowerCase();
+    const requestedRole = sanitize(body.role).toUpperCase();
+    const role = [roles.CUSTOMER, roles.TECHNICIAN, roles.ADMIN].includes(requestedRole) ? requestedRole : sanitize(body.adminAccessCode) ? roles.ADMIN : "";
+    const user = role
+      ? db.users.find((item) => item.email === email && item.role === role)
+      : db.users.find((item) => item.email === email && item.status === "ACTIVE" && item.role !== roles.ADMIN);
     if (!user || !verifyPassword(String(body.password || ""), user.passwordHash)) return error(res, 401, "Invalid email or password.");
     if (user.role === roles.ADMIN && sanitize(body.adminAccessCode) !== ADMIN_ACCESS_CODE) return error(res, 403, "Owner access code is required for admin login.");
     const session = { id: id("ses"), userId: user.id, createdAt: now(), expiresAt: new Date(Date.now() + 7 * 86400 * 1000).toISOString() };
@@ -1011,6 +1080,10 @@ async function api(req, res, db) {
     const user = requireUser(req, res, db, [roles.ADMIN]);
     if (!user) return;
     const revenue = db.invoices.reduce((sum, invoice) => sum + invoice.platformFeeCents, 0);
+    const pendingTechnicians = db.technicianProfiles.filter((item) => ["PENDING", "UNDER_REVIEW"].includes(item.verificationStatus)).map((profile) => ({
+      ...profile,
+      user: publicUser(db.users.find((item) => item.id === profile.userId))
+    }));
     const reviewDisputes = db.disputes.filter((item) => item.type === "REVIEW_DISPUTE" && item.status !== "CLOSED").map((dispute) => ({
       ...dispute,
       review: db.reviews.find((review) => review.id === dispute.reviewId),
@@ -1022,7 +1095,8 @@ async function api(req, res, db) {
       todaysBookings: db.bookings.length,
       totalCustomers: db.users.filter((item) => item.role === roles.CUSTOMER).length,
       totalTechnicians: db.users.filter((item) => item.role === roles.TECHNICIAN).length,
-      pendingTechnicianApprovals: db.technicianProfiles.filter((item) => ["PENDING", "UNDER_REVIEW"].includes(item.verificationStatus)).length,
+      pendingTechnicianApprovals: pendingTechnicians.length,
+      pendingTechnicians,
       todaysRevenueCents: revenue,
       technicianPayoutsCents: db.payouts.reduce((sum, payout) => sum + payout.amountCents, 0),
       openDisputes: db.disputes.filter((item) => item.status !== "CLOSED").length,
@@ -1060,7 +1134,9 @@ async function api(req, res, db) {
     if (!user) return;
     const profile = db.technicianProfiles.find((item) => item.userId === body.technicianId);
     if (!profile) return error(res, 404, "Technician not found.");
-    profile.verificationStatus = body.status || "APPROVED";
+    const nextStatus = sanitize(body.status || "APPROVED").toUpperCase();
+    if (!["APPROVED", "DENIED", "UNDER_REVIEW", "PENDING"].includes(nextStatus)) return error(res, 400, "Unknown technician approval status.");
+    profile.verificationStatus = nextStatus;
     profile.updatedAt = now();
     addAudit(db, user.id, "TECHNICIAN_VERIFICATION_CHANGED", "TechnicianProfile", profile.id, { status: profile.verificationStatus });
     saveDb(db);

@@ -66,6 +66,13 @@
 
           <form id="loginForm" class="auth-form hidden">
             <h2>Log In</h2>
+            <label>Account type
+              <select name="role" id="loginRole">
+                <option value="CUSTOMER">Customer</option>
+                <option value="TECHNICIAN">Technician</option>
+                <option value="ADMIN">Owner/Admin</option>
+              </select>
+            </label>
             <label>Email <input name="email" type="email" autocomplete="email" required /></label>
             <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
             <label id="ownerCodeField" class="hidden">Owner access code <input name="adminAccessCode" autocomplete="off" placeholder="Private admin code" /></label>
@@ -74,8 +81,8 @@
             <details class="demo-access">
               <summary>Demo access</summary>
               <div class="quick-logins">
-                <button type="button" data-login="customer@demo.com">Customer demo</button>
-                <button type="button" data-login="tech@demo.com">Technician demo</button>
+                <button type="button" data-login="customer@demo.com" data-login-role="CUSTOMER">Customer demo</button>
+                <button type="button" data-login="tech@demo.com" data-login-role="TECHNICIAN">Technician demo</button>
               </div>
             </details>
             <button class="link-button" type="button" id="ownerLoginBtn">Owner/Admin Login</button>
@@ -290,6 +297,10 @@
             </div>
           </div>
           <div id="adminMetrics" class="metrics"></div>
+          <section class="panel">
+            <h2>Technician Applications</h2>
+            <div id="adminTechnicianApplications" class="list"></div>
+          </section>
           <form id="settingsForm" class="panel compact">
             <h2>Platform Fees</h2>
             <label>Commission percent <input name="platformCommissionPercent" type="number" min="0" max="40" step="0.5" value="10" /></label>
