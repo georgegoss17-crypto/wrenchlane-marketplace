@@ -386,38 +386,8 @@ function readSessionValue(cookieValue) {
 function seed(db) {
   if (db.users.length) return db;
   const createdAt = now();
-  const customer = { id: id("usr"), email: "customer@demo.com", passwordHash: hashPassword("DemoPass123!"), role: roles.CUSTOMER, status: "ACTIVE", createdAt, updatedAt: createdAt };
-  const tech = { id: id("usr"), email: "tech@demo.com", passwordHash: hashPassword("DemoPass123!"), role: roles.TECHNICIAN, status: "ACTIVE", createdAt, updatedAt: createdAt };
   const admin = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_ADMIN_PASSWORD), role: roles.ADMIN, status: "ACTIVE", createdAt, updatedAt: createdAt };
-  db.users.push(customer, tech, admin);
-  db.customerProfiles.push({ id: id("cus"), userId: customer.id, fullName: "Jordan Driver", phone: "555-0100", createdAt, updatedAt: createdAt });
-  db.technicianProfiles.push({
-    id: id("tec"),
-    userId: tech.id,
-    fullName: "Avery Masterson",
-    profilePhotoUrl: "",
-    bio: "ASE-certified mobile technician focused on clear estimates, clean work, and honest inspections.",
-    yearsExperience: 12,
-    specialties: ["Brakes", "Diagnostics", "Suspension"],
-    certifications: ["ASE Brakes", "ASE Electrical"],
-    applicationAnswers: {
-      yearsInField: 12,
-      hasTravelVehicle: true,
-      partsPreference: "Technician can source parts or customer can supply parts",
-      honestRepairs: true,
-      complaintResolution: true
-    },
-    serviceRadiusMiles: 35,
-    mobileServiceAvailable: true,
-    shopServiceAvailable: true,
-    hourlyRateCents: 10500,
-    defaultFlatRateCents: 42500,
-    verificationStatus: "APPROVED",
-    ratingAverage: 4.9,
-    createdAt,
-    updatedAt: createdAt
-  });
-  db.technicianCertifications.push({ id: id("cert"), technicianProfileId: db.technicianProfiles[0].id, name: "ASE Brakes", documentUrl: "", status: "APPROVED", createdAt });
+  db.users.push(admin);
   applyDefaultServiceCatalog(db);
   db.platformSettings.push({ key: "platformCommissionPercent", value: "10", updatedAt: createdAt });
   db.platformSettings.push({ key: "adminAccessCodeConfigured", value: "true", updatedAt: createdAt });
@@ -438,9 +408,36 @@ function normalizeDb(db) {
     if (!profile.applicationAnswers) profile.applicationAnswers = {};
   }
   applyDefaultServiceCatalog(db);
+  purgeDemoAccounts(db);
   syncOwnerAdmin(db);
   syncOwnerCustomerAndTechnician(db);
   return db;
+}
+
+function purgeDemoAccounts(db) {
+  const demoUserIds = new Set(db.users.filter((user) => ["customer@demo.com", "tech@demo.com"].includes(user.email)).map((user) => user.id));
+  if (!demoUserIds.size) return;
+  const demoBookingIds = new Set(db.bookings.filter((booking) => demoUserIds.has(booking.customerId) || demoUserIds.has(booking.technicianId)).map((booking) => booking.id));
+  const demoProfileIds = new Set(db.technicianProfiles.filter((profile) => demoUserIds.has(profile.userId)).map((profile) => profile.id));
+  db.users = db.users.filter((user) => !demoUserIds.has(user.id));
+  db.customerProfiles = db.customerProfiles.filter((profile) => !demoUserIds.has(profile.userId));
+  db.technicianProfiles = db.technicianProfiles.filter((profile) => !demoUserIds.has(profile.userId));
+  db.technicianCertifications = db.technicianCertifications.filter((cert) => !demoProfileIds.has(cert.technicianProfileId));
+  db.vehicles = db.vehicles.filter((vehicle) => !demoUserIds.has(vehicle.customerId));
+  db.locations = db.locations.filter((location) => !demoUserIds.has(location.userId));
+  db.bookings = db.bookings.filter((booking) => !demoBookingIds.has(booking.id));
+  db.quotes = db.quotes.filter((quote) => !demoBookingIds.has(quote.bookingId));
+  db.invoices = db.invoices.filter((invoice) => !demoBookingIds.has(invoice.bookingId));
+  db.payments = db.payments.filter((payment) => !demoBookingIds.has(payment.bookingId));
+  db.payouts = db.payouts.filter((payout) => !demoUserIds.has(payout.technicianId));
+  db.additionalWorkRequests = db.additionalWorkRequests.filter((request) => !demoBookingIds.has(request.bookingId));
+  db.inspectionFindings = db.inspectionFindings.filter((finding) => !demoBookingIds.has(finding.bookingId));
+  db.technicianProfileComments = db.technicianProfileComments.filter((comment) => !demoUserIds.has(comment.technicianId) && !demoUserIds.has(comment.customerId));
+  db.messages = db.messages.filter((message) => !demoBookingIds.has(message.bookingId));
+  db.reviews = db.reviews.filter((review) => !demoBookingIds.has(review.bookingId));
+  db.notifications = db.notifications.filter((notification) => !demoUserIds.has(notification.userId));
+  db.disputes = db.disputes.filter((dispute) => !demoBookingIds.has(dispute.bookingId));
+  db.sessions = db.sessions.filter((session) => !demoUserIds.has(session.userId));
 }
 
 function syncOwnerAdmin(db) {
@@ -751,6 +748,8 @@ function serializeBooking(db, booking, user) {
 }
 
 function technicianMatches(db, technicianUserId, service, location) {
+  const user = db.users.find((item) => item.id === technicianUserId && item.role === roles.TECHNICIAN);
+  if (!isAccountActive(user)) return false;
   const profile = db.technicianProfiles.find((item) => item.userId === technicianUserId);
   if (!profile || profile.verificationStatus !== "APPROVED") return false;
   const specialties = profile.specialties || [];
@@ -947,7 +946,10 @@ async function api(req, res, db) {
 
   if (req.method === "GET" && url.pathname === "/api/technicians") {
     return send(res, 200, {
-      technicians: db.technicianProfiles.filter((profile) => profile.verificationStatus === "APPROVED").map((profile) => ({
+      technicians: db.technicianProfiles.filter((profile) => {
+        const techUser = db.users.find((user) => user.id === profile.userId);
+        return profile.verificationStatus === "APPROVED" && isAccountActive(techUser);
+      }).map((profile) => ({
         ...profile,
         user: publicUser(db.users.find((user) => user.id === profile.userId)),
         reviews: visibleReviews(db, profile.userId),
@@ -1339,6 +1341,16 @@ async function api(req, res, db) {
       bookingCount: db.bookings.filter((booking) => booking.customerId === customer.id).length,
       lastBookingAt: db.bookings.filter((booking) => booking.customerId === customer.id).map((booking) => booking.createdAt).sort().at(-1) || null
     }));
+    const technicians = db.users.filter((item) => item.role === roles.TECHNICIAN).map((technician) => ({
+      ...publicUser(technician),
+      statusLabel: accountStatusText(technician),
+      suspendedUntil: technician.suspendedUntil || null,
+      suspensionReason: technician.suspensionReason || "",
+      profile: db.technicianProfiles.find((profile) => profile.userId === technician.id),
+      bookingCount: db.bookings.filter((booking) => booking.technicianId === technician.id).length,
+      activeBookingCount: db.bookings.filter((booking) => booking.technicianId === technician.id && !["COMPLETED", "CANCELLED", "REFUNDED"].includes(booking.status)).length,
+      lastBookingAt: db.bookings.filter((booking) => booking.technicianId === technician.id).map((booking) => booking.createdAt).sort().at(-1) || null
+    }));
     const pendingTechnicians = db.technicianProfiles.filter((item) => ["PENDING", "UNDER_REVIEW"].includes(item.verificationStatus)).map((profile) => ({
       ...profile,
       user: publicUser(db.users.find((item) => item.id === profile.userId))
@@ -1370,7 +1382,8 @@ async function api(req, res, db) {
       },
       recentLogs: db.auditLogs.slice(-25).reverse(),
       recentNotifications: db.notifications.slice(-25).reverse(),
-      customers
+      customers,
+      technicians
     });
   }
 
@@ -1408,6 +1421,48 @@ async function api(req, res, db) {
     notify(db, customer.id, `CUSTOMER_${action}`, "Account status updated", `Your WrenchLane customer account is now ${accountStatusText(customer)}.`);
     saveDb(db);
     return send(res, 200, { customer: publicUser(customer), statusLabel: accountStatusText(customer) });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/technicians/status") {
+    const user = requireUser(req, res, db, [roles.ADMIN]);
+    if (!user) return;
+    const technician = db.users.find((item) => item.id === body.technicianId && item.role === roles.TECHNICIAN);
+    if (!technician) return error(res, 404, "Technician not found.");
+    const action = sanitize(body.action).toUpperCase();
+    const reason = sanitize(body.reason);
+    const profile = db.technicianProfiles.find((item) => item.userId === technician.id);
+    if (action === "SUSPEND") {
+      const days = Number(body.days);
+      if (![5, 15, 30].includes(days)) return error(res, 400, "Suspension must be 5, 15, or 30 days.");
+      technician.status = "SUSPENDED";
+      technician.suspendedUntil = addDays(days);
+      technician.suspensionReason = reason || `${days} day service suspension`;
+      if (profile) profile.verificationStatus = "SUSPENDED";
+    } else if (action === "BLOCK") {
+      technician.status = "BLOCKED";
+      technician.suspendedUntil = null;
+      technician.suspensionReason = reason || "Blocked by owner/admin";
+      if (profile) profile.verificationStatus = "BLOCKED";
+    } else if (action === "DELETE") {
+      technician.status = "DELETED";
+      technician.suspendedUntil = null;
+      technician.suspensionReason = reason || "Deleted by owner/admin";
+      if (profile) profile.verificationStatus = "DELETED";
+    } else if (action === "ACTIVATE") {
+      technician.status = "ACTIVE";
+      technician.suspendedUntil = null;
+      technician.suspensionReason = "";
+      if (profile && ["SUSPENDED", "BLOCKED", "DELETED"].includes(profile.verificationStatus)) profile.verificationStatus = "APPROVED";
+    } else {
+      return error(res, 400, "Choose delete, block, suspend, or activate.");
+    }
+    technician.updatedAt = now();
+    if (profile) profile.updatedAt = now();
+    db.sessions = db.sessions.filter((session) => session.userId !== technician.id);
+    addAudit(db, user.id, `TECHNICIAN_${action}`, "User", technician.id, { days: body.days || null, reason });
+    notify(db, technician.id, `TECHNICIAN_${action}`, "Account status updated", `Your WrenchLane technician account is now ${accountStatusText(technician)}.`);
+    saveDb(db);
+    return send(res, 200, { technician: publicUser(technician), statusLabel: accountStatusText(technician), profile });
   }
 
   const adminReviewDispute = url.pathname.match(/^\/api\/admin\/review-disputes\/([^/]+)\/resolve$/);

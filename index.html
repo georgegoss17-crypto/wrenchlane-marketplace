@@ -78,13 +78,6 @@
             <label id="ownerCodeField" class="hidden">Owner access code <input name="adminAccessCode" autocomplete="off" placeholder="Private admin code" /></label>
             <button type="submit">Log In</button>
             <button class="link-button" type="button" id="resetPasswordBtn">Send password reset link</button>
-            <details class="demo-access">
-              <summary>Demo access</summary>
-              <div class="quick-logins">
-                <button type="button" data-login="customer@demo.com" data-login-role="CUSTOMER">Customer demo</button>
-                <button type="button" data-login="tech@demo.com" data-login-role="TECHNICIAN">Technician demo</button>
-              </div>
-            </details>
             <button class="link-button" type="button" id="ownerLoginBtn">Owner/Admin Login</button>
           </form>
 
@@ -318,6 +311,10 @@
           <section class="panel">
             <h2>Customer Accounts</h2>
             <div id="adminCustomerAccounts" class="list"></div>
+          </section>
+          <section class="panel">
+            <h2>Technician Accounts</h2>
+            <div id="adminTechnicianAccounts" class="list"></div>
           </section>
           <form id="settingsForm" class="panel compact">
             <h2>Platform Fees</h2>

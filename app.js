@@ -361,7 +361,7 @@ async function refreshTechnician() {
   const current = state.bookings.find((b) => ["BOOKED", "ARRIVED", "IN_PROGRESS"].includes(b.status));
   $("#currentJob").textContent = current ? current.service.name : "None";
   $("#earnings").textContent = money(state.bookings.reduce((sum, b) => sum + (b.invoice?.technicianEarningsCents || 0), 0));
-  $("#techJobs").innerHTML = state.bookings.map(renderTechJob).join("") || "<p class='fineprint'>No jobs assigned yet. Customer demo can create one.</p>";
+  $("#techJobs").innerHTML = state.bookings.map(renderTechJob).join("") || "<p class='fineprint'>No jobs assigned yet.</p>";
   $("#techReviews").innerHTML = techReviews.reviews.map(renderTechReview).join("") || "<p class='fineprint'>No customer reviews yet.</p>";
 }
 
@@ -466,6 +466,7 @@ async function refreshAdmin() {
   document.querySelector("[name=platformCommissionPercent]").value = state.admin.commissionPercent;
   $("#adminTechnicianApplications").innerHTML = (state.admin.pendingTechnicians || []).map(renderAdminTechnicianApplication).join("") || "<p class='fineprint'>No technician applications waiting right now.</p>";
   $("#adminCustomerAccounts").innerHTML = (state.admin.customers || []).map(renderAdminCustomerAccount).join("") || "<p class='fineprint'>No customer accounts yet.</p>";
+  $("#adminTechnicianAccounts").innerHTML = (state.admin.technicians || []).map(renderAdminTechnicianAccount).join("") || "<p class='fineprint'>No technician accounts yet.</p>";
   $("#adminReviewDisputes").innerHTML = (state.admin.reviewDisputes || []).map(renderAdminReviewDispute).join("") || "<p class='fineprint'>No review disputes need a decision.</p>";
   renderAdminStorageAndLogs();
 }
@@ -524,6 +525,39 @@ function renderAdminCustomerAccount(customer) {
     </div>
     <p class="fineprint">Last booking: ${customer.lastBookingAt ? new Date(customer.lastBookingAt).toLocaleString() : "None yet"}</p>
     <form class="mini-form" data-customer-status-form="${customer.id}">
+      <label>Reason <input name="reason" placeholder="Reason for this account action" /></label>
+      <label>Suspend
+        <select name="days">
+          <option value="5">5 days</option>
+          <option value="15">15 days</option>
+          <option value="30">30 days</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button name="action" value="SUSPEND" type="submit" ${disabled ? "disabled" : ""}>Suspend</button>
+        <button name="action" value="BLOCK" type="submit" class="ghost" ${disabled ? "disabled" : ""}>Block</button>
+        <button name="action" value="DELETE" type="submit" class="ghost">Delete</button>
+        <button name="action" value="ACTIVATE" type="submit" class="ghost">Reactivate</button>
+      </div>
+    </form>
+  </article>`;
+}
+
+function renderAdminTechnicianAccount(technician) {
+  const name = technician.profile?.fullName || "Technician";
+  const details = `${technician.activeBookingCount || 0} active - ${technician.bookingCount || 0} total jobs`;
+  const disabled = technician.status === "DELETED";
+  return `<article class="item">
+    <div class="item-head">
+      <div>
+        <strong>${escapeHtml(name)}</strong>
+        <p class="meta">${escapeHtml(technician.email)} - ${escapeHtml(technician.statusLabel || technician.status)}</p>
+        <p class="meta">Profile: ${escapeHtml(technician.profile?.verificationStatus || "No profile")} - Rating: ${escapeHtml(technician.profile?.ratingAverage || "New")}</p>
+      </div>
+      <span class="status">${details}</span>
+    </div>
+    <p class="fineprint">Last booking: ${technician.lastBookingAt ? new Date(technician.lastBookingAt).toLocaleString() : "None yet"}</p>
+    <form class="mini-form" data-technician-status-form="${technician.id}">
       <label>Reason <input name="reason" placeholder="Reason for this account action" /></label>
       <label>Suspend
         <select name="days">
@@ -799,6 +833,16 @@ document.body.addEventListener("submit", async (e) => {
       await api("/api/admin/customers/status", { method: "POST", body });
       await refreshAdmin();
       toast("Customer account updated.");
+    }
+    if (form.dataset.technicianStatusForm) {
+      e.preventDefault();
+      const submitter = e.submitter;
+      const body = Object.fromEntries(new FormData(form).entries());
+      body.technicianId = form.dataset.technicianStatusForm;
+      body.action = submitter?.value || body.action;
+      await api("/api/admin/technicians/status", { method: "POST", body });
+      await refreshAdmin();
+      toast("Technician account updated.");
     }
   } catch (err) {
     toast(err.message);
