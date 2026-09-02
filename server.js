@@ -22,6 +22,7 @@ const ADMIN_ACCESS_CODE = process.env.ADMIN_ACCESS_CODE || "2825966745370125";
 const CUSTOMER_TERMS_VERSION = "customer-repair-authorization-v1";
 const TECHNICIAN_TERMS_VERSION = "technician-service-standards-v1";
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
+const SITE_NAME = "WrenchLane";
 
 function resolveDataDir(requestedDir) {
   try {
@@ -314,13 +315,13 @@ function hashToken(token) {
 
 async function sendPasswordResetEmail(user, resetUrl) {
   const roleLabel = user.role === roles.TECHNICIAN ? "technician" : user.role === roles.ADMIN ? "owner/admin" : "customer";
-  const subject = `Reset your WrenchLane ${roleLabel} password`;
-  const text = `Use this secure link to reset your WrenchLane ${roleLabel} password. This link expires in 1 hour.\n\n${resetUrl}`;
+  const subject = `Reset your ${SITE_NAME} ${roleLabel} password`;
+  const text = `Site: ${SITE_NAME}\nAccount type: ${roleLabel}\n\nUse this secure link to reset your ${SITE_NAME} ${roleLabel} password. This link expires in 1 hour.\n\n${resetUrl}`;
   if (!process.env.EMAIL_PROVIDER_API_KEY) {
     console.log(`[password-reset] Email provider not configured. Reset link for ${user.email}: ${resetUrl}`);
     return { sent: false, provider: "LOCAL_LOG" };
   }
-  const from = process.env.EMAIL_FROM || "WrenchLane <onboarding@resend.dev>";
+  const from = process.env.EMAIL_FROM || `${SITE_NAME} <onboarding@resend.dev>`;
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -348,7 +349,7 @@ async function sendNotificationEmail(user, title, body) {
     console.log(`[notification-email] Email provider not configured. ${user.email}: ${title} - ${body}`);
     return { sent: false, provider: "LOCAL_LOG" };
   }
-  const from = process.env.EMAIL_FROM || "WrenchLane <onboarding@resend.dev>";
+  const from = process.env.EMAIL_FROM || `${SITE_NAME} <onboarding@resend.dev>`;
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -358,8 +359,8 @@ async function sendNotificationEmail(user, title, body) {
     body: JSON.stringify({
       from,
       to: [user.email],
-      subject: `WrenchLane: ${title}`,
-      text: `${body}\n\nOpen WrenchLane to view the latest details.`
+      subject: `${SITE_NAME}: ${title}`,
+      text: `${body}\n\nOpen ${SITE_NAME} to view the latest details.`
     })
   });
   if (!response.ok) {
@@ -690,10 +691,47 @@ function addAudit(db, actorUserId, action, entityType, entityId, metadata = {}) 
   db.auditLogs.push({ id: id("aud"), actorUserId, action, entityType, entityId, metadata, createdAt: now() });
 }
 
-function notify(db, userId, type, title, body) {
-  db.notifications.push({ id: id("not"), userId, type, title, body, readAt: null, createdAt: now() });
+function accountTypeLabel(user) {
+  if (user?.role === roles.TECHNICIAN) return "Technician";
+  if (user?.role === roles.ADMIN) return "Owner/Admin";
+  return "Customer";
+}
+
+function displayNameForUser(db, userId) {
   const user = db.users.find((item) => item.id === userId);
-  sendNotificationEmail(user, title, body).catch((err) => console.error(`[notification-email] ${err.message}`));
+  if (!user) return "WrenchLane";
+  const profile = user.role === roles.TECHNICIAN
+    ? db.technicianProfiles.find((item) => item.userId === user.id)
+    : user.role === roles.CUSTOMER
+      ? db.customerProfiles.find((item) => item.userId === user.id)
+      : db.adminUsers.find((item) => item.userId === user.id);
+  return profile?.fullName || user.email || accountTypeLabel(user);
+}
+
+function vehicleLabelForBooking(db, bookingId) {
+  const booking = db.bookings.find((item) => item.id === bookingId);
+  const vehicle = booking ? db.vehicles.find((item) => item.id === booking.vehicleId) : null;
+  return vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : "";
+}
+
+function notificationEmailBody(db, recipient, body, details = {}) {
+  const lines = [
+    `Site: ${SITE_NAME}`,
+    `Account type: ${accountTypeLabel(recipient)}`
+  ];
+  if (details.senderUserId) lines.push(`Sender name: ${displayNameForUser(db, details.senderUserId)}`);
+  else if (details.senderName) lines.push(`Sender name: ${details.senderName}`);
+  const vehicle = details.vehicle || (details.bookingId ? vehicleLabelForBooking(db, details.bookingId) : "");
+  if (vehicle) lines.push(`Vehicle: ${vehicle}`);
+  lines.push("", body);
+  return lines.join("\n");
+}
+
+function notify(db, userId, type, title, body, details = {}) {
+  const user = db.users.find((item) => item.id === userId);
+  const emailBody = notificationEmailBody(db, user, body, details);
+  db.notifications.push({ id: id("not"), userId, type, title, body, emailBody, readAt: null, createdAt: now() });
+  sendNotificationEmail(user, title, emailBody).catch((err) => console.error(`[notification-email] ${err.message}`));
 }
 
 function visibleReviews(db, technicianId) {
@@ -973,7 +1011,7 @@ async function api(req, res, db) {
     };
     if (!comment.body) return error(res, 400, "Comment cannot be empty.");
     db.technicianProfileComments.push(comment);
-    notify(db, technician.userId, "PROFILE_COMMENT", "New profile comment", comment.body);
+    notify(db, technician.userId, "PROFILE_COMMENT", "New profile comment", comment.body, { senderUserId: user.id });
     saveDb(db);
     return send(res, 201, { comment });
   }
@@ -1064,7 +1102,7 @@ async function api(req, res, db) {
     const booking = { id: id("bok"), customerId: user.id, technicianId: technician.id, vehicleId: vehicle.id, serviceId: service.id, locationId: location.id, status: "REQUESTED", serviceMode: body.serviceMode === "SHOP" ? "SHOP" : "MOBILE", preferredAt: body.preferredAt, symptoms: sanitize(body.symptoms), dtcs: sanitize(body.dtcs), mediaUrls: [], createdAt: now(), updatedAt: now() };
     db.locations.push(location);
     db.bookings.push(booking);
-    notify(db, technician.id, "NEW_BOOKING_REQUEST", "New customer request", `${service.name} requested for ${vehicle.year} ${vehicle.make} ${vehicle.model}. Customer note: ${booking.symptoms || "No description provided."}`);
+    notify(db, technician.id, "NEW_BOOKING_REQUEST", "New customer request", `${service.name} requested for ${vehicle.year} ${vehicle.make} ${vehicle.model}. Customer note: ${booking.symptoms || "No description provided."}`, { senderUserId: user.id, bookingId: booking.id });
     saveDb(db);
     return send(res, 201, { booking });
   }
@@ -1116,8 +1154,8 @@ async function api(req, res, db) {
       db.quotes = db.quotes.filter((item) => item.bookingId !== booking.id);
       booking.status = "REQUESTED";
     }
-    notify(db, technician.id, "BOOKING_UPDATED", "Customer updated booking", `${service.name} for ${vehicle.year} ${vehicle.make} ${vehicle.model}.`);
-    if (previousTechnicianId !== technician.id) notify(db, previousTechnicianId, "BOOKING_REASSIGNED", "Customer selected another technician", "A customer changed the technician on a booking.");
+    notify(db, technician.id, "BOOKING_UPDATED", "Customer updated booking", `${service.name} for ${vehicle.year} ${vehicle.make} ${vehicle.model}.`, { senderUserId: user.id, bookingId: booking.id });
+    if (previousTechnicianId !== technician.id) notify(db, previousTechnicianId, "BOOKING_REASSIGNED", "Customer selected another technician", "A customer changed the technician on a booking.", { senderUserId: user.id, bookingId: booking.id });
     saveDb(db);
     return send(res, 200, { booking, location });
   }
@@ -1145,7 +1183,7 @@ async function api(req, res, db) {
       booking.status = "BOOKED";
       booking.preferredAt = scheduledAt;
       booking.updatedAt = now();
-      notify(db, booking.customerId, "BOOKING_ACCEPTED", "Technician accepted", `Your repair request was accepted for ${new Date(scheduledAt).toLocaleString()}.`);
+      notify(db, booking.customerId, "BOOKING_ACCEPTED", "Technician accepted", `Your repair request was accepted for ${new Date(scheduledAt).toLocaleString()}.`, { senderUserId: user.id, bookingId: booking.id });
       saveDb(db);
       return send(res, 200, { booking });
     }
@@ -1171,7 +1209,7 @@ async function api(req, res, db) {
       booking.status = "AWAITING_CUSTOMER_APPROVAL";
       booking.updatedAt = now();
       const quoteVehicle = db.vehicles.find((item) => item.id === booking.vehicleId);
-      notify(db, booking.customerId, "QUOTE_READY", "Your quote is ready", `The technician sent a quote for ${service?.name || "your repair"} on your ${quoteVehicle ? `${quoteVehicle.year} ${quoteVehicle.make} ${quoteVehicle.model}` : "vehicle"}. Quote amount: ${money(amountCents)}. Log in to approve or review it.`);
+      notify(db, booking.customerId, "QUOTE_READY", "Your quote is ready", `The technician sent a quote for ${service?.name || "your repair"} on your ${quoteVehicle ? `${quoteVehicle.year} ${quoteVehicle.make} ${quoteVehicle.model}` : "vehicle"}. Quote amount: ${money(amountCents)}. Log in to approve or review it.`, { senderUserId: user.id, bookingId: booking.id });
       saveDb(db);
       return send(res, 201, { quote, booking });
     }
@@ -1186,7 +1224,7 @@ async function api(req, res, db) {
       booking.updatedAt = now();
       const payment = { id: id("pay"), bookingId: booking.id, processor: process.env.STRIPE_SECRET_KEY ? "STRIPE" : "LOCAL_SIMULATED_STRIPE", processorPaymentId: process.env.STRIPE_SECRET_KEY ? "" : `sim_${id("pi")}`, amountCents: quote.amountCents, status: "AUTHORIZED", createdAt: now() };
       db.payments.push(payment);
-      notify(db, booking.technicianId, "QUOTE_APPROVED", "Quote approved", "The customer approved your quote and payment authorization is recorded.");
+      notify(db, booking.technicianId, "QUOTE_APPROVED", "Quote approved", "The customer approved your quote and payment authorization is recorded.", { senderUserId: user.id, bookingId: booking.id });
       saveDb(db);
       return send(res, 200, { booking, quote, payment, stripeRequiredForProduction: !process.env.STRIPE_SECRET_KEY });
     }
@@ -1198,7 +1236,7 @@ async function api(req, res, db) {
       if (!canTransition(booking.status, nextStatus)) return error(res, 409, `Cannot move from ${booking.status} to ${nextStatus}.`);
       booking.status = nextStatus;
       booking.updatedAt = now();
-      notify(db, booking.customerId, `JOB_${nextStatus}`, "Job update", `Your job is now ${nextStatus.replaceAll("_", " ").toLowerCase()}.`);
+      notify(db, booking.customerId, `JOB_${nextStatus}`, "Job update", `Your job is now ${nextStatus.replaceAll("_", " ").toLowerCase()}.`, { senderUserId: user.id, bookingId: booking.id });
       if (nextStatus === "COMPLETED") {
         const invoiceMath = invoiceForBooking(db, booking);
         const invoice = { id: id("inv"), bookingId: booking.id, customerId: booking.customerId, technicianId: booking.technicianId, ...invoiceMath, status: "ISSUED", createdAt: now() };
@@ -1217,7 +1255,7 @@ async function api(req, res, db) {
       db.additionalWorkRequests.push(request);
       booking.status = "ADDITIONAL_WORK_REQUESTED";
       booking.updatedAt = now();
-      notify(db, booking.customerId, "ADDITIONAL_WORK_REQUESTED", "Additional work requested", `${request.description}: ${money(request.amountCents)}`);
+      notify(db, booking.customerId, "ADDITIONAL_WORK_REQUESTED", "Additional work requested", `${request.description}: ${money(request.amountCents)}`, { senderUserId: user.id, bookingId: booking.id });
       saveDb(db);
       return send(res, 201, { request, booking });
     }
@@ -1238,7 +1276,7 @@ async function api(req, res, db) {
       };
       if (!finding.notes && !finding.suggestedRepair && !finding.photoUrls.length) return error(res, 400, "Add notes, a suggested repair, or at least one photo.");
       db.inspectionFindings.push(finding);
-      notify(db, booking.customerId, "INSPECTION_FINDING_ADDED", "Technician added inspection findings", finding.suggestedRepair || finding.notes || finding.title);
+      notify(db, booking.customerId, "INSPECTION_FINDING_ADDED", "Technician added inspection findings", finding.suggestedRepair || finding.notes || finding.title, { senderUserId: user.id, bookingId: booking.id });
       saveDb(db);
       return send(res, 201, { finding });
     }
@@ -1249,7 +1287,7 @@ async function api(req, res, db) {
       db.messages.push(message);
       const recipientId = user.id === booking.customerId ? booking.technicianId : booking.customerId;
       const senderLabel = user.id === booking.customerId ? "customer" : "technician";
-      notify(db, recipientId, "NEW_MESSAGE", "You got a response", `Your ${senderLabel} sent a new message: ${message.body}`);
+      notify(db, recipientId, "NEW_MESSAGE", "You got a response", `Your ${senderLabel} sent a new message: ${message.body}`, { senderUserId: user.id, bookingId: booking.id });
       saveDb(db);
       return send(res, 201, { message });
     }
@@ -1263,7 +1301,7 @@ async function api(req, res, db) {
       review.status = "ACTIVE";
       db.reviews.push(review);
       updateTechnicianRating(db, booking.technicianId);
-      notify(db, booking.technicianId, "REVIEW_RECEIVED", "New review received", `${review.rating} stars`);
+      notify(db, booking.technicianId, "REVIEW_RECEIVED", "New review received", `${review.rating} stars`, { senderUserId: user.id, bookingId: booking.id });
       saveDb(db);
       return send(res, 201, { review });
     }
@@ -1282,7 +1320,7 @@ async function api(req, res, db) {
     booking.status = request.status === "APPROVED" ? "ADDITIONAL_WORK_APPROVED" : "ADDITIONAL_WORK_DECLINED";
     booking.updatedAt = now();
     addAudit(db, user.id, `ADDITIONAL_WORK_${request.status}`, "AdditionalWorkRequest", request.id, { amountCents: request.amountCents });
-    notify(db, request.technicianId, `ADDITIONAL_WORK_${request.status}`, "Additional work decision", `Customer ${request.status.toLowerCase()} the request.`);
+    notify(db, request.technicianId, `ADDITIONAL_WORK_${request.status}`, "Additional work decision", `Customer ${request.status.toLowerCase()} the request.`, { senderUserId: user.id, bookingId: booking.id });
     saveDb(db);
     return send(res, 200, { request, booking });
   }
@@ -1322,7 +1360,7 @@ async function api(req, res, db) {
     if (!dispute.reason) return error(res, 400, "Tell the owner/admin why this review should be checked.");
     db.disputes.push(dispute);
     review.status = "DISPUTED";
-    notify(db, user.id, "REVIEW_DISPUTE_CREATED", "Review dispute sent to owner/admin", dispute.reason);
+    notify(db, user.id, "REVIEW_DISPUTE_CREATED", "Review dispute sent to owner/admin", dispute.reason, { senderUserId: user.id, bookingId: dispute.bookingId });
     saveDb(db);
     return send(res, 201, { dispute });
   }
@@ -1457,7 +1495,7 @@ async function api(req, res, db) {
     customer.updatedAt = now();
     db.sessions = db.sessions.filter((session) => session.userId !== customer.id);
     addAudit(db, user.id, `CUSTOMER_${action}`, "User", customer.id, { days: body.days || null, reason });
-    notify(db, customer.id, `CUSTOMER_${action}`, "Account status updated", `Your WrenchLane customer account is now ${accountStatusText(customer)}.`);
+    notify(db, customer.id, `CUSTOMER_${action}`, "Account status updated", `Your ${SITE_NAME} customer account is now ${accountStatusText(customer)}.`, { senderUserId: user.id });
     saveDb(db);
     return send(res, 200, { customer: publicUser(customer), statusLabel: accountStatusText(customer) });
   }
@@ -1499,7 +1537,7 @@ async function api(req, res, db) {
     if (profile) profile.updatedAt = now();
     db.sessions = db.sessions.filter((session) => session.userId !== technician.id);
     addAudit(db, user.id, `TECHNICIAN_${action}`, "User", technician.id, { days: body.days || null, reason });
-    notify(db, technician.id, `TECHNICIAN_${action}`, "Account status updated", `Your WrenchLane technician account is now ${accountStatusText(technician)}.`);
+    notify(db, technician.id, `TECHNICIAN_${action}`, "Account status updated", `Your ${SITE_NAME} technician account is now ${accountStatusText(technician)}.`, { senderUserId: user.id });
     saveDb(db);
     return send(res, 200, { technician: publicUser(technician), statusLabel: accountStatusText(technician), profile });
   }

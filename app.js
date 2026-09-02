@@ -96,7 +96,8 @@ function showShell() {
     return;
   }
   $$(".public-action").forEach((button) => button.classList.toggle("hidden", Boolean(state.user)));
-  $$(".app-action").forEach((button) => button.classList.toggle("hidden", !state.user));
+  $$("[data-view=customer]").forEach((button) => button.classList.toggle("hidden", state.user?.role !== "CUSTOMER"));
+  $$("[data-view=technician]").forEach((button) => button.classList.toggle("hidden", state.user?.role !== "TECHNICIAN"));
   $$("[data-view=admin]").forEach((button) => button.classList.toggle("hidden", state.user?.role !== "ADMIN"));
   $("#logoutBtn").classList.toggle("hidden", !state.user);
   if (state.user) {
@@ -105,7 +106,19 @@ function showShell() {
   }
 }
 
+function allowedViewForRole(name) {
+  if (!state.user) return false;
+  if (state.user.role === "CUSTOMER") return ["customer", "technicianProfile"].includes(name);
+  if (state.user.role === "TECHNICIAN") return name === "technician";
+  if (state.user.role === "ADMIN") return name === "admin";
+  return false;
+}
+
 function switchView(name) {
+  if (!allowedViewForRole(name)) {
+    toast("That page is not available for this account type.");
+    return;
+  }
   $$(".view").forEach((el) => el.classList.add("hidden"));
   $(`#${name}View`).classList.remove("hidden");
   if (name === "customer") refreshCustomer();
