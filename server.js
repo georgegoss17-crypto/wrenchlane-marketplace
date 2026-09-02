@@ -649,7 +649,7 @@ function parseBody(req) {
     let body = "";
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > 6_000_000) reject(new Error("Request body too large"));
+      if (body.length > 25_000_000) reject(new Error("Request body too large"));
     });
     req.on("end", () => {
       if (!body) return resolve({});
@@ -1387,6 +1387,45 @@ async function api(req, res, db) {
     });
   }
 
+  if (req.method === "GET" && url.pathname === "/api/admin/database-export") {
+    const user = requireUser(req, res, db, [roles.ADMIN]);
+    if (!user) return;
+    addAudit(db, user.id, "DATABASE_EXPORTED", "Database", "database", { requestedAt: now() });
+    saveDb(db);
+    return send(res, 200, {
+      exportedAt: now(),
+      version: 1,
+      database: db
+    });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/database-import") {
+    const user = requireUser(req, res, db, [roles.ADMIN]);
+    if (!user) return;
+    const incoming = body.database && typeof body.database === "object" ? body.database : body;
+    if (!incoming || !Array.isArray(incoming.users)) return error(res, 400, "Choose a valid WrenchLane database backup file.");
+    const restored = normalizeDb(incoming);
+    const restoredAdmin = restored.users.find((item) => item.email === OWNER_ADMIN_EMAIL && item.role === roles.ADMIN);
+    const sessionId = readSessionValue(parseCookies(req).session);
+    restored.sessions = sessionId && restoredAdmin ? [{ id: sessionId, userId: restoredAdmin.id, createdAt: now(), expiresAt: new Date(Date.now() + 7 * 86400 * 1000).toISOString() }] : [];
+    addAudit(restored, restoredAdmin?.id || user.id, "DATABASE_IMPORTED", "Database", "database", {
+      importedAt: now(),
+      users: restored.users.length,
+      bookings: restored.bookings.length,
+      sourceExportedAt: body.exportedAt || null
+    });
+    for (const key of Object.keys(db)) delete db[key];
+    Object.assign(db, restored);
+    saveDb(db);
+    return send(res, 200, {
+      ok: true,
+      users: db.users.length,
+      customers: db.users.filter((item) => item.role === roles.CUSTOMER).length,
+      technicians: db.users.filter((item) => item.role === roles.TECHNICIAN).length,
+      bookings: db.bookings.length
+    });
+  }
+
   if (req.method === "POST" && url.pathname === "/api/admin/customers/status") {
     const user = requireUser(req, res, db, [roles.ADMIN]);
     if (!user) return;
@@ -1521,7 +1560,7 @@ async function api(req, res, db) {
 
 function createApp(customDbFile) {
   if (customDbFile) process.env.DB_FILE = customDbFile;
-  const db = loadDb();
+  let db = loadDb();
   return async (req, res) => {
     try {
       if (req.url.startsWith("/api/")) return await api(req, res, db);

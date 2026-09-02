@@ -897,6 +897,40 @@ $("#settingsForm").addEventListener("submit", async (e) => {
   try { await api("/api/admin/settings", { method: "POST", body }); await refreshAdmin(); toast("Settings saved."); } catch (err) { toast(err.message); }
 });
 
+$("#exportDatabaseBtn").addEventListener("click", async () => {
+  try {
+    const backup = await api("/api/admin/database-export");
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `wrenchlane-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    await refreshAdmin();
+    toast("Database backup downloaded.");
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$("#importDatabaseForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const file = e.currentTarget.elements.backupFile.files[0];
+  if (!file) return toast("Choose a backup file first.");
+  try {
+    const backup = JSON.parse(await file.text());
+    const result = await api("/api/admin/database-import", { method: "POST", body: backup });
+    await refreshAdmin();
+    e.currentTarget.reset();
+    toast(`Backup restored: ${result.customers} customers, ${result.technicians} techs.`);
+  } catch (err) {
+    toast(`Restore failed: ${err.message}`);
+  }
+});
+
 $("#bookButton").addEventListener("click", () => $("#bookingForm").scrollIntoView({ behavior: "smooth" }));
 $("#findJobs").addEventListener("click", refreshTechnician);
 $("#backToTechnicians").addEventListener("click", () => switchView("customer"));

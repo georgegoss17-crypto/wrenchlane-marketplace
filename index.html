@@ -328,6 +328,14 @@
           <section class="panel">
             <h2>Storage & Logs</h2>
             <div id="adminStorageStatus" class="list"></div>
+            <div class="actions">
+              <button type="button" id="exportDatabaseBtn">Export Database Backup</button>
+            </div>
+            <form id="importDatabaseForm" class="mini-form">
+              <label>Restore backup <input name="backupFile" type="file" accept="application/json,.json" required /></label>
+              <button type="submit">Restore Database Backup</button>
+              <p class="fineprint">Use this only if Render comes up empty after an update. It restores accounts, bookings, profiles, chats, reviews, payments, and logs from your backup file.</p>
+            </form>
             <div id="adminRecentLogs" class="list"></div>
           </section>
         </section>
