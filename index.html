@@ -13,12 +13,9 @@
         <span>WrenchLane</span>
       </div>
       <nav>
-        <button class="ghost public-action" data-auth-tab="signup">Customer Sign Up</button>
-        <button class="ghost public-action" data-auth-tab="tech">Tech Sign Up</button>
-        <button class="ghost public-action" data-auth-tab="login">Log in</button>
-        <button class="ghost app-action hidden" data-view="customer">Customer</button>
-        <button class="ghost app-action hidden" data-view="technician">Technician</button>
-        <button class="ghost app-action hidden" data-view="admin">Admin</button>
+        <button class="ghost" data-view="customer">Customer</button>
+        <button class="ghost" data-view="technician">Technician</button>
+        <button class="ghost" data-view="admin">Admin</button>
         <button id="logoutBtn" class="icon-btn" title="Log out">Log out</button>
       </nav>
     </header>
@@ -29,126 +26,17 @@
           <p class="eyebrow">Automotive repair marketplace</p>
           <h1>Need a mechanic?</h1>
           <p>Book approved mobile or shop technicians, approve flat-rate quotes, message through the job, and keep repair records in one place.</p>
-          <div class="hero-actions">
-            <button data-auth-tab="signup">Book a Technician</button>
-            <button class="ghost dark" data-auth-tab="tech">Apply as Technician</button>
-          </div>
         </div>
-        <section class="panel auth-card">
-          <div class="auth-tabs">
-            <button class="active" type="button" data-auth-tab="signup">Customer Sign Up</button>
-            <button type="button" data-auth-tab="login">Log in</button>
-            <button type="button" data-auth-tab="tech">Tech Sign Up</button>
+        <form id="loginForm" class="panel">
+          <h2>Open Your Dashboard</h2>
+          <label>Email <input name="email" type="email" value="customer@demo.com" required /></label>
+          <label>Password <input name="password" type="password" value="DemoPass123!" required /></label>
+          <button type="submit">Log in</button>
+          <div class="quick-logins">
+            <button type="button" data-login="customer@demo.com">Customer demo</button>
+            <button type="button" data-login="tech@demo.com">Technician demo</button>
+            <button type="button" data-login="admin@demo.com">Admin demo</button>
           </div>
-
-          <form id="signupForm" class="auth-form">
-            <h2>Create Customer Account</h2>
-            <p class="fineprint">Start with your name, email, and password. After signup you can add a vehicle and request a repair.</p>
-            <label>Full name <input name="fullName" autocomplete="name" required /></label>
-            <label>Email <input name="email" type="email" autocomplete="email" required /></label>
-            <label>Password <input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
-            <details class="terms-box">
-              <summary>Customer repair authorization and payment terms</summary>
-              <div class="terms-scroll">
-                <h3>Customer Repair Authorization, Payment Agreement & Platform Terms</h3>
-                <p><strong>Important: read before authorizing service.</strong></p>
-                <p>By booking, requesting, approving, or allowing automotive diagnostic, maintenance, or repair services through the Platform, the Customer acknowledges and agrees to these terms.</p>
-                <p>I certify that I am the owner of the vehicle or have lawful authority to authorize service. I authorize only the services I approve through the Platform.</p>
-                <p>The agreed price is not negotiable after properly authorized work has been performed. For flat-rate work, the Customer is purchasing completion of the authorized service, not a specific number of clock hours.</p>
-                <p>Diagnostic services are chargeable professional services. Additional chargeable work requires Customer authorization. Customer-supplied parts are the Customer's responsibility unless otherwise agreed or required by law.</p>
-                <p>The Platform connects Customers with independent Technicians. Unless expressly stated otherwise, the Platform does not perform automotive repairs and does not guarantee independent Technician workmanship.</p>
-                <p>Customers agree to provide truthful information, provide a safe work area, allow reasonable repair documentation, and use the Platform dispute process for legitimate concerns.</p>
-              </div>
-            </details>
-            <label class="agree-line"><input name="customerTermsAccepted" type="checkbox" required /> I Agree & Authorize Service terms for my account.</label>
-            <button type="submit">Create Account</button>
-          </form>
-
-          <form id="loginForm" class="auth-form hidden">
-            <h2>Log In</h2>
-            <label>Account type
-              <select name="role" id="loginRole">
-                <option value="CUSTOMER">Customer</option>
-                <option value="TECHNICIAN">Technician</option>
-                <option value="ADMIN">Owner/Admin</option>
-              </select>
-            </label>
-            <label>Email <input name="email" type="email" autocomplete="email" required /></label>
-            <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
-            <label id="ownerCodeField" class="hidden">Owner access code <input name="adminAccessCode" autocomplete="off" placeholder="Private admin code" /></label>
-            <button type="submit">Log In</button>
-            <button class="link-button" type="button" id="resetPasswordBtn">Send password reset link</button>
-            <details class="demo-access">
-              <summary>Demo access</summary>
-              <div class="quick-logins">
-                <button type="button" data-login="customer@demo.com" data-login-role="CUSTOMER">Customer demo</button>
-                <button type="button" data-login="tech@demo.com" data-login-role="TECHNICIAN">Technician demo</button>
-              </div>
-            </details>
-            <button class="link-button" type="button" id="ownerLoginBtn">Owner/Admin Login</button>
-          </form>
-
-          <form id="technicianSignupForm" class="auth-form hidden">
-            <h2>Apply as Technician</h2>
-            <p class="fineprint">Technicians can create a profile now. An admin must approve the profile before paid jobs can be accepted.</p>
-            <label>Professional name <input name="fullName" autocomplete="name" required /></label>
-            <label>Full legal name <input name="legalName" autocomplete="name" required /></label>
-            <label>Business name, if applicable <input name="businessName" /></label>
-            <label>Email <input name="email" type="email" autocomplete="email" required /></label>
-            <label>Password <input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
-            <label>How many years do you have in the auto field? <input name="yearsInField" type="number" min="0" required /></label>
-            <label>Do you have a vehicle that you can use to travel to customers?
-              <select name="hasTravelVehicle" required>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-            </label>
-            <label>Parts preference
-              <select name="partsPreference" required>
-                <option value="Technician supplied parts">I prefer to get/supply the customer parts</option>
-                <option value="Customer supplied parts">I prefer the customer supplies parts</option>
-                <option value="Either technician or customer supplied parts">Either option is okay</option>
-              </select>
-            </label>
-            <label class="agree-line"><input name="honestRepairs" type="checkbox" required /> I agree to be honest about repairs that are needed.</label>
-            <label class="agree-line"><input name="complaintResolution" type="checkbox" required /> I agree to try to resolve customer complaints without complication when the issue may be related to my service.</label>
-            <details class="terms-box">
-              <summary>Technician service standards</summary>
-              <div class="terms-scroll">
-                <h3>Mobile Automotive Technician Agreement & Service Standards</h3>
-                <p><strong>Important: Technician Agreement.</strong> By registering as a Technician, accepting a service request, or performing automotive services through the Platform, you agree to these Technician Terms and Service Standards.</p>
-                <p>You understand the Platform is a marketplace connecting Customers with independent automotive Technicians. You are responsible for your own workmanship, qualifications, tools, conduct, taxes, licenses, insurance, safety practices, and legal requirements.</p>
-                <p>You must provide truthful information about years of experience, ASE or manufacturer certifications, dealership or shop experience, specialty training, tools, insurance, licenses, and capabilities. You may not claim credentials you do not possess.</p>
-                <p>Before accepting a job, you must reasonably evaluate the vehicle, requested service, symptoms, repair location, tools required, expected difficulty, safety requirements, special tools, programming needs, lift needs, and whether the work can be safely performed as mobile service.</p>
-                <p>You may only perform services authorized by the Customer. You may not begin additional chargeable work until the Customer authorizes it through the Platform when required.</p>
-                <p>Flat-rate/job-based pricing pays for completion of the authorized service, not the exact clock time. You may not falsely represent actual hours when the Customer is being charged actual hourly labor.</p>
-                <p>You should document vehicle condition, pre-existing damage, diagnostic findings, significant repair steps, parts, before/after condition, and testing when reasonably possible. This documentation protects both you and the Customer.</p>
-                <p>You agree to cooperate honestly with disputes and chargebacks by providing relevant records such as authorization, estimates, invoices, before/after photos, notes, messages, parts receipts, timestamps, and completion records.</p>
-                <p>If the Customer supplies parts, you are not expected to warranty the customer-supplied part itself unless separately agreed or legally required. You remain responsible for properly installing any part you agree to install.</p>
-                <p>You must not falsify invoices, certifications, diagnoses, photographs, service records, repair times, or customer authorizations. Fraud, theft, unsafe workmanship, intentional misconduct, or serious policy violations may result in suspension or removal.</p>
-                <p>You acknowledge that Customers choose their Technician, the Platform does not guarantee jobs or income, and you remain responsible for the quality and safety of work you personally perform.</p>
-              </div>
-            </details>
-            <label>Electronic signature <input name="electronicSignature" placeholder="Type your full legal name" required /></label>
-            <label class="agree-line"><input name="technicianTermsAccepted" type="checkbox" required /> I agree to the technician service standards.</label>
-            <button type="submit">Submit Application</button>
-          </form>
-        </section>
-      </section>
-
-      <section id="resetPanel" class="hidden auth-grid">
-        <div class="intro compact-intro">
-          <p class="eyebrow">Password reset</p>
-          <h1>Set a new password</h1>
-          <p>Use the secure link from your email to create a new password for your customer, technician, or admin account.</p>
-        </div>
-        <form id="newPasswordForm" class="panel auth-card">
-          <h2>New Password</h2>
-          <input name="token" type="hidden" />
-          <label>New password <input name="password" type="password" autocomplete="new-password" minlength="8" required /></label>
-          <label>Confirm password <input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required /></label>
-          <button type="submit">Update Password</button>
-          <button type="button" class="link-button" id="backToLoginBtn">Back to login</button>
         </form>
       </section>
 
@@ -174,19 +62,6 @@
             <div><span>Recent vehicles</span><strong id="vehicleCount">0</strong></div>
             <div><span>Repair history</span><strong id="historyCount">0 completed</strong></div>
           </div>
-          <form id="customerProfileForm" class="panel">
-            <h2>Customer Profile</h2>
-            <div class="form-row">
-              <label>Name <input name="fullName" id="customerFullName" autocomplete="name" required /></label>
-              <label>Email <input id="customerEmail" type="email" disabled /></label>
-              <label>Phone number <input name="phone" id="customerPhone" autocomplete="tel" /></label>
-            </div>
-            <button type="submit">Save Profile</button>
-          </form>
-          <section class="panel">
-            <h2>Choose a Technician</h2>
-            <div id="technicianProfiles" class="tech-grid"></div>
-          </section>
           <div class="grid two">
             <form id="vehicleForm" class="panel">
               <h2>Add Vehicle</h2>
@@ -202,21 +77,15 @@
                 <label>Mileage <input name="mileage" type="number" value="74200" /></label>
                 <label>VIN <input name="vin" value="4T1C11AK0LU000000" /></label>
               </div>
-              <div class="form-row">
-                <label>Plate <input name="plate" placeholder="ABC1234" /></label>
-                <label>Color <input name="color" placeholder="Silver" /></label>
-              </div>
               <button type="submit">Save Vehicle</button>
-              <div id="vehicleProfiles" class="list"></div>
             </form>
 
             <form id="bookingForm" class="panel">
               <h2>Repair Request</h2>
-              <p id="bookingHint" class="fineprint hidden">Add a vehicle first, then you can request a technician.</p>
               <label>Vehicle <select name="vehicleId" id="vehicleSelect"></select></label>
               <label>Service <select name="serviceId" id="serviceSelect"></select></label>
               <label>Technician <select name="technicianId" id="technicianSelect"></select></label>
-              <label>Describe what you need done <textarea name="symptoms" placeholder="Example: I need front brakes replaced, and the pedal shakes when stopping."></textarea></label>
+              <label>Symptoms <textarea name="symptoms">Grinding sound under braking</textarea></label>
               <label>DTCs <input name="dtcs" placeholder="P0300, P0420" /></label>
               <div class="form-row">
                 <label>Service mode
@@ -238,19 +107,6 @@
           </section>
         </section>
 
-        <section id="technicianProfileView" class="view hidden">
-          <div class="dashboard-head">
-            <div>
-              <p class="eyebrow">Technician profile</p>
-              <h1 id="profilePageTitle">Technician</h1>
-            </div>
-            <button class="ghost" id="backToTechnicians">Back</button>
-          </div>
-          <section class="panel">
-            <div id="selectedTechnicianProfile"></div>
-          </section>
-        </section>
-
         <section id="technicianView" class="view hidden">
           <div class="dashboard-head">
             <div>
@@ -265,41 +121,9 @@
             <div><span>Earnings</span><strong id="earnings">$0.00</strong></div>
             <div><span>Rating</span><strong id="techRating">4.9</strong></div>
           </div>
-          <div class="grid two">
-            <form id="techProfileForm" class="panel">
-              <h2>Professional Profile</h2>
-              <label>Profile photo <input name="profilePhoto" type="file" accept="image/*" /></label>
-              <label>Display name <input name="fullName" id="techFullName" required /></label>
-              <label>Bio <textarea name="bio" id="techBio" placeholder="Describe your experience, shop background, specialties, and how you work with customers."></textarea></label>
-              <div class="form-row">
-                <label>Years in field <input name="yearsExperience" id="techYears" type="number" min="0" /></label>
-                <label>Default flat rate <input name="defaultFlatRate" id="techFlatRate" type="number" min="100" step="1" /></label>
-              </div>
-              <div class="form-row">
-                <label>Hourly rate <input name="hourlyRate" id="techHourlyRate" type="number" min="100" step="1" /></label>
-                <label>Service radius miles <input name="serviceRadiusMiles" id="techRadius" type="number" min="1" /></label>
-              </div>
-              <label>Specialties <input name="specialties" id="techSpecialties" placeholder="Brakes, Diagnostics, Suspension" /></label>
-              <label>Certifications <input name="certifications" id="techCertifications" placeholder="ASE Brakes, ASE Electrical" /></label>
-              <div class="check-row">
-                <label><input name="mobileServiceAvailable" id="techMobile" type="checkbox" /> Mobile service</label>
-                <label><input name="shopServiceAvailable" id="techShop" type="checkbox" /> Shop service</label>
-              </div>
-              <button type="submit">Save Profile</button>
-            </form>
-            <section class="panel">
-              <h2>How Scheduling Works</h2>
-              <p class="fineprint">Customers request a preferred time. You choose the final appointment time when you accept. The app blocks another job within two hours of that appointment.</p>
-              <div id="techProfilePreview" class="profile-preview"></div>
-            </section>
-          </div>
           <section class="panel">
             <h2>Job Queue</h2>
             <div id="techJobs" class="list"></div>
-          </section>
-          <section class="panel">
-            <h2>Review Disputes</h2>
-            <div id="techReviews" class="list"></div>
           </section>
         </section>
 
@@ -311,28 +135,11 @@
             </div>
           </div>
           <div id="adminMetrics" class="metrics"></div>
-          <section class="panel">
-            <h2>Technician Applications</h2>
-            <div id="adminTechnicianApplications" class="list"></div>
-          </section>
-          <section class="panel">
-            <h2>Customer Accounts</h2>
-            <div id="adminCustomerAccounts" class="list"></div>
-          </section>
           <form id="settingsForm" class="panel compact">
             <h2>Platform Fees</h2>
             <label>Commission percent <input name="platformCommissionPercent" type="number" min="0" max="40" step="0.5" value="10" /></label>
             <button type="submit">Save Settings</button>
           </form>
-          <section class="panel">
-            <h2>Review Disputes</h2>
-            <div id="adminReviewDisputes" class="list"></div>
-          </section>
-          <section class="panel">
-            <h2>Storage & Logs</h2>
-            <div id="adminStorageStatus" class="list"></div>
-            <div id="adminRecentLogs" class="list"></div>
-          </section>
         </section>
       </section>
     </main>
