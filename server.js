@@ -23,6 +23,7 @@ const CUSTOMER_TERMS_VERSION = "customer-repair-authorization-v1";
 const TECHNICIAN_TERMS_VERSION = "technician-service-standards-v1";
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
 const SITE_NAME = "WrenchLane";
+const AUTO_BACKUP_INTERVAL_MS = Number(process.env.AUTO_BACKUP_INTERVAL_MS || 15 * 60 * 1000);
 
 function resolveDataDir(requestedDir) {
   try {
@@ -360,7 +361,7 @@ async function sendNotificationEmail(user, title, body) {
       from,
       to: [user.email],
       subject: `${SITE_NAME}: ${title}`,
-      text: `${body}\n\nOpen ${SITE_NAME} to view the latest details.`
+      text: `${body}\n\nUse the website link above to view the latest details.`
     })
   });
   if (!response.ok) {
@@ -518,17 +519,37 @@ function databaseFilePath() {
   return process.env.DB_FILE || path.join(DATA_DIR, "database.json");
 }
 
+function backupDirForDbFile(dbFile = databaseFilePath()) {
+  return dbFile === path.join(DATA_DIR, "database.json") ? BACKUP_DIR : path.join(path.dirname(dbFile), "backups");
+}
+
 function backupDatabaseFile(dbFile) {
   if (!fs.existsSync(dbFile)) return;
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const backupDir = backupDirForDbFile(dbFile);
+  fs.mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupFile = path.join(BACKUP_DIR, `database-${stamp}-${crypto.randomBytes(3).toString("hex")}.json`);
+  const backupFile = path.join(backupDir, `database-${stamp}-${crypto.randomBytes(3).toString("hex")}.json`);
   fs.copyFileSync(dbFile, backupFile);
-  const backups = fs.readdirSync(BACKUP_DIR)
-    .filter((name) => name.startsWith("database-") && name.endsWith(".json"))
-    .map((name) => ({ name, fullPath: path.join(BACKUP_DIR, name), mtime: fs.statSync(path.join(BACKUP_DIR, name)).mtimeMs }))
-    .sort((a, b) => b.mtime - a.mtime);
+  const backups = backupFiles(backupDir);
   for (const backup of backups.slice(50)) fs.unlinkSync(backup.fullPath);
+}
+
+function backupFiles(backupDir = BACKUP_DIR) {
+  if (!fs.existsSync(backupDir)) return [];
+  return fs.readdirSync(backupDir)
+    .filter((name) => name.startsWith("database-") && name.endsWith(".json"))
+    .map((name) => ({ name, fullPath: path.join(backupDir, name), mtime: fs.statSync(path.join(backupDir, name)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+function restoreLatestDatabaseBackup(dbFile) {
+  const latest = backupFiles(backupDirForDbFile(dbFile))[0];
+  if (!latest) return null;
+  const restored = normalizeDb(seed(JSON.parse(fs.readFileSync(latest.fullPath, "utf8"))));
+  fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+  fs.writeFileSync(dbFile, JSON.stringify(restored, null, 2));
+  console.warn(`[storage] Restored database from automatic backup: ${latest.name}`);
+  return restored;
 }
 
 function writeJsonSafely(filePath, data) {
@@ -543,16 +564,51 @@ function loadDb() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const dbFile = databaseFilePath();
   if (!fs.existsSync(dbFile)) {
+    const restored = restoreLatestDatabaseBackup(dbFile);
+    if (restored) return restored;
     const seeded = normalizeDb(seed(blankDb()));
     fs.mkdirSync(path.dirname(dbFile), { recursive: true });
     writeJsonSafely(dbFile, seeded);
     return seeded;
   }
-  return normalizeDb(seed(JSON.parse(fs.readFileSync(dbFile, "utf8"))));
+  try {
+    return normalizeDb(seed(JSON.parse(fs.readFileSync(dbFile, "utf8"))));
+  } catch (err) {
+    console.error(`[storage] Database could not be loaded: ${err.message}`);
+    const restored = restoreLatestDatabaseBackup(dbFile);
+    if (restored) return restored;
+    throw err;
+  }
 }
 
 function saveDb(db) {
   writeJsonSafely(databaseFilePath(), db);
+}
+
+function createAutomaticSnapshot(db) {
+  const backupDir = backupDirForDbFile();
+  fs.mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupFile = path.join(backupDir, `database-auto-${stamp}.json`);
+  fs.writeFileSync(backupFile, JSON.stringify(db, null, 2));
+  for (const backup of backupFiles(backupDir).slice(100)) fs.unlinkSync(backup.fullPath);
+  return backupFile;
+}
+
+function startAutomaticSnapshots(db) {
+  if (!AUTO_BACKUP_INTERVAL_MS) return null;
+  const run = () => {
+    try {
+      const backupFile = createAutomaticSnapshot(db);
+      console.log(`[storage] Automatic database snapshot saved: ${backupFile}`);
+    } catch (err) {
+      console.error(`[storage] Automatic database snapshot failed: ${err.message}`);
+    }
+  };
+  run();
+  const timer = setInterval(run, AUTO_BACKUP_INTERVAL_MS);
+  timer.unref?.();
+  return timer;
 }
 
 function publicUser(user) {
@@ -723,6 +779,7 @@ function notificationEmailBody(db, recipient, body, details = {}) {
   else if (details.senderName) lines.push(`Sender name: ${details.senderName}`);
   const vehicle = details.vehicle || (details.bookingId ? vehicleLabelForBooking(db, details.bookingId) : "");
   if (vehicle) lines.push(`Vehicle: ${vehicle}`);
+  lines.push(`Open website: ${APP_BASE_URL.replace(/\/$/, "")}`);
   lines.push("", body);
   return lines.join("\n");
 }
@@ -1454,6 +1511,8 @@ async function api(req, res, db) {
       technicianProfile: db.technicianProfiles.find((profile) => profile.userId === dispute.technicianId),
       customer: publicUser(db.users.find((item) => item.id === dispute.customerId))
     }));
+    const activeBackupDir = backupDirForDbFile();
+    const activeBackups = backupFiles(activeBackupDir);
     return send(res, 200, {
       activeJobs: db.bookings.filter((booking) => !["COMPLETED", "CANCELLED", "REFUNDED"].includes(booking.status)).length,
       todaysBookings: db.bookings.length,
@@ -1469,8 +1528,11 @@ async function api(req, res, db) {
       storage: {
         dataDir: DATA_DIR,
         databaseFile: databaseFilePath(),
-        backupDir: BACKUP_DIR,
-        backupCount: fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter((name) => name.endsWith(".json")).length : 0,
+        backupDir: activeBackupDir,
+        backupCount: activeBackups.length,
+        latestBackupAt: activeBackups[0] ? new Date(activeBackups[0].mtime).toISOString() : null,
+        automaticBackupsEnabled: Boolean(AUTO_BACKUP_INTERVAL_MS),
+        automaticBackupIntervalMinutes: AUTO_BACKUP_INTERVAL_MS ? Math.round(AUTO_BACKUP_INTERVAL_MS / 60000) : 0,
         persistentDiskExpected: DATA_DIR.replace(/\\/g, "/").startsWith("/var/data")
       },
       recentLogs: db.auditLogs.slice(-25).reverse(),
@@ -1654,6 +1716,7 @@ async function api(req, res, db) {
 function createApp(customDbFile) {
   if (customDbFile) process.env.DB_FILE = customDbFile;
   let db = loadDb();
+  if (!customDbFile) startAutomaticSnapshots(db);
   return async (req, res) => {
     try {
       if (req.url.startsWith("/api/")) return await api(req, res, db);

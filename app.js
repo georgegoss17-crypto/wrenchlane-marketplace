@@ -1,4 +1,5 @@
 const state = { user: null, profile: null, vehicles: [], categories: [], services: [], technicians: [], bookings: [], admin: null, selectedTechnicianId: null };
+const AUTO_REFRESH_MS = 15 * 1000;
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
@@ -1000,4 +1001,4 @@ if (resetToken) {
   $("#newPasswordForm [name=token]").value = resetToken;
 }
 refreshBase().catch(() => showShell());
-setInterval(() => refreshCurrentView().catch((err) => console.warn("Auto refresh failed", err)), 60 * 1000);
+setInterval(() => refreshCurrentView().catch((err) => console.warn("Auto refresh failed", err)), AUTO_REFRESH_MS);
