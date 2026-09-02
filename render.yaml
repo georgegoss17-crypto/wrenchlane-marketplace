@@ -19,6 +19,10 @@ services:
         value: /var/data
       - key: SESSION_SECRET
         generateValue: true
+      - key: OWNER_ADMIN_EMAIL
+        value: georgegoss17@gmail.com
+      - key: OWNER_ADMIN_PASSWORD
+        sync: false
       - key: ADMIN_ACCESS_CODE
         sync: false
       - key: STRIPE_SECRET_KEY

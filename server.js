@@ -11,7 +11,9 @@ const PUBLIC_DIR = ROOT;
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, "data");
 const SESSION_SECRET = process.env.SESSION_SECRET || "local-development-secret-change-before-production";
 const MIN_FLAT_RATE_CENTS_PER_HOUR = 10000;
-const ADMIN_ACCESS_CODE = process.env.ADMIN_ACCESS_CODE || "CHANGE-ME-OWNER-CODE";
+const OWNER_ADMIN_EMAIL = (process.env.OWNER_ADMIN_EMAIL || "georgegoss17@gmail.com").toLowerCase();
+const OWNER_ADMIN_PASSWORD = process.env.OWNER_ADMIN_PASSWORD || "WynterChristopher0125!";
+const ADMIN_ACCESS_CODE = process.env.ADMIN_ACCESS_CODE || "2825966745370125";
 const CUSTOMER_TERMS_VERSION = "customer-repair-authorization-v1";
 const TECHNICIAN_TERMS_VERSION = "technician-service-standards-v1";
 const APP_BASE_URL = process.env.APP_BASE_URL || `http://localhost:${PORT}`;
@@ -169,7 +171,7 @@ function seed(db) {
   const createdAt = now();
   const customer = { id: id("usr"), email: "customer@demo.com", passwordHash: hashPassword("DemoPass123!"), role: roles.CUSTOMER, status: "ACTIVE", createdAt, updatedAt: createdAt };
   const tech = { id: id("usr"), email: "tech@demo.com", passwordHash: hashPassword("DemoPass123!"), role: roles.TECHNICIAN, status: "ACTIVE", createdAt, updatedAt: createdAt };
-  const admin = { id: id("usr"), email: "admin@demo.com", passwordHash: hashPassword("DemoPass123!"), role: roles.ADMIN, status: "ACTIVE", createdAt, updatedAt: createdAt };
+  const admin = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_ADMIN_PASSWORD), role: roles.ADMIN, status: "ACTIVE", createdAt, updatedAt: createdAt };
   const brakes = { id: id("cat"), name: "Brakes" };
   const electrical = { id: id("cat"), name: "Diagnostics" };
   db.users.push(customer, tech, admin);
@@ -207,7 +209,7 @@ function seed(db) {
     { id: id("svc"), categoryId: electrical.id, name: "Check engine diagnostic", description: "Read DTCs and perform initial diagnostic workflow.", pricingModel: "HOURLY", basePriceCents: 14500, estimatedMinutes: 60, requiredSpecialty: "Diagnostics" }
   );
   db.platformSettings.push({ key: "platformCommissionPercent", value: "10", updatedAt: createdAt });
-  db.platformSettings.push({ key: "adminAccessCodeConfigured", value: ADMIN_ACCESS_CODE === "CHANGE-ME-OWNER-CODE" ? "false" : "true", updatedAt: createdAt });
+  db.platformSettings.push({ key: "adminAccessCodeConfigured", value: "true", updatedAt: createdAt });
   db.adminUsers.push({ id: id("adm"), userId: admin.id, createdAt });
   return db;
 }
@@ -224,7 +226,22 @@ function normalizeDb(db) {
     profile.defaultFlatRateCents = Math.max(profile.defaultFlatRateCents, MIN_FLAT_RATE_CENTS_PER_HOUR);
     if (!profile.applicationAnswers) profile.applicationAnswers = {};
   }
+  syncOwnerAdmin(db);
   return db;
+}
+
+function syncOwnerAdmin(db) {
+  const timestamp = now();
+  let admin = db.users.find((user) => user.role === roles.ADMIN);
+  if (!admin) {
+    admin = { id: id("usr"), email: OWNER_ADMIN_EMAIL, passwordHash: hashPassword(OWNER_ADMIN_PASSWORD), role: roles.ADMIN, status: "ACTIVE", createdAt: timestamp, updatedAt: timestamp };
+    db.users.push(admin);
+  }
+  if (admin.email !== OWNER_ADMIN_EMAIL) admin.email = OWNER_ADMIN_EMAIL;
+  if (!verifyPassword(OWNER_ADMIN_PASSWORD, admin.passwordHash)) admin.passwordHash = hashPassword(OWNER_ADMIN_PASSWORD);
+  admin.status = "ACTIVE";
+  admin.updatedAt = timestamp;
+  if (!db.adminUsers.some((item) => item.userId === admin.id)) db.adminUsers.push({ id: id("adm"), userId: admin.id, createdAt: timestamp });
 }
 
 function loadDb() {

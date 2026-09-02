@@ -322,7 +322,7 @@ $("#loginForm").addEventListener("submit", async (e) => {
 $("#ownerLoginBtn").addEventListener("click", () => {
   setAuthTab("login");
   $("#ownerCodeField").classList.remove("hidden");
-  $("#loginForm [name=email]").value = "admin@demo.com";
+  $("#loginForm [name=email]").value = "georgegoss17@gmail.com";
   $("#loginForm [name=password]").value = "";
   toast("Enter your private owner access code to open admin controls.");
 });
